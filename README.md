@@ -54,7 +54,7 @@ bash build-win/build_win.sh    # SkyRecomp.exe
 ```
 
 ## Dev keys
-F4 widescreen, F11 borderless, F1 layout. Dev builds (`DEV=1 bash build-win/build_win.sh`) add F5/F9 quicksave/quickload and F6 to test the save gear.
+F4 widescreen, F11 borderless, F1 layout. Dev builds (`DEV=1 bash build-win/build_win.sh`) add F5/F9 quicksave/quickload.
 
 ## License
 GPL-3.0, like melonDS and the SkyTemple patches it builds on. Pokémon Mystery Dungeon is © Nintendo / Creatures /
