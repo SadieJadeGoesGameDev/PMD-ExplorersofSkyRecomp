@@ -1,0 +1,22 @@
+# Game data never goes in this repo: bring your own ROM
+*.nds
+*.sav
+*.quicksave
+*.rpl
+*.mst
+*.qs
+# Generated from the ROM by the tools
+gen/
+inventory.json
+runtime/sadie_patches.h
+tools/sadie_funcs.json
+# Build output
+build/obj/
+build/recomp_harness
+build/jobs.txt
+build-win/obj/
+build-win/*.exe
+build-win/jobs.txt
+__pycache__/
+SkyRecomp.ini
+recomp_log*.txt

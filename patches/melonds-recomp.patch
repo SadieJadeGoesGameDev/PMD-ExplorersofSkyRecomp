@@ -1,0 +1,644 @@
+diff --git a/src/ARM.cpp b/src/ARM.cpp
+index 3937a99..d2bc3fb 100644
+--- a/src/ARM.cpp
++++ b/src/ARM.cpp
+@@ -589,9 +589,49 @@ void ARM::CheckGdbIncoming()
+     GdbCheckA();
+ }
+ 
++void (*NativeExecuteHook)(ARMv5*) = nullptr;
++
++void ARMv5::StepOne()
++{
++    if (CPSR & 0x20)
++    {
++        R[15] += 2;
++        CurInstr = NextInstr[0];
++        NextInstr[0] = NextInstr[1];
++        if (R[15] & 0x2) { NextInstr[1] >>= 16; CodeCycles = 0; }
++        else             NextInstr[1] = CodeRead32(R[15], false);
++        u32 icode = (CurInstr >> 6) & 0x3FF;
++        ARMInterpreter::THUMBInstrTable[icode](this);
++    }
++    else
++    {
++        R[15] += 4;
++        CurInstr = NextInstr[0];
++        NextInstr[0] = NextInstr[1];
++        NextInstr[1] = CodeRead32(R[15], false);
++        if (CheckCondition(CurInstr >> 28))
++        {
++            u32 icode = ((CurInstr >> 4) & 0xF) | ((CurInstr >> 16) & 0xFF0);
++            ARMInterpreter::ARMInstrTable[icode](this);
++        }
++        else if ((CurInstr & 0xFE000000) == 0xFA000000)
++            ARMInterpreter::A_BLX_IMM(this);
++        else
++            AddCycles_C();
++    }
++    if (!Halted && IRQ) TriggerIRQ();
++    NDS.ARM9Timestamp += Cycles;
++    Cycles = 0;
++}
++
+ template <CPUExecuteMode mode>
+ void ARMv5::Execute()
+ {
++    if constexpr (mode == CPUExecuteMode::Interpreter)
++    {
++        if (NativeExecuteHook) { NativeExecuteHook(this); return; }
++    }
++
+     if constexpr (mode == CPUExecuteMode::InterpreterGDB)
+         GdbCheckB();
+ 
+diff --git a/src/ARM.h b/src/ARM.h
+index 88f970b..62df28e 100644
+--- a/src/ARM.h
++++ b/src/ARM.h
+@@ -229,6 +229,9 @@ protected:
+     void GdbCheckC();
+ };
+ 
++class ARMv5;
++extern void (*NativeExecuteHook)(ARMv5*);
++
+ class ARMv5 : public ARM
+ {
+ public:
+@@ -250,6 +253,7 @@ public:
+ 
+     template <CPUExecuteMode mode>
+     void Execute();
++    void StepOne();   // recomp: execute exactly one instruction
+ 
+     // all code accesses are forced nonseq 32bit
+     u32 CodeRead32(u32 addr, bool branch);
+diff --git a/src/FreeBIOS.cpp b/src/FreeBIOS.cpp
+index 54c3a11..54c55e7 100644
+--- a/src/FreeBIOS.cpp
++++ b/src/FreeBIOS.cpp
+@@ -24,6 +24,7 @@
+     POSSIBILITY OF SUCH DAMAGE.
+ */
+ 
++#include <algorithm>
+ #include "FreeBIOS.h"
+ 
+ namespace melonDS
+diff --git a/src/GPU2D_Soft.cpp b/src/GPU2D_Soft.cpp
+index 5adc545..3bccdbc 100644
+--- a/src/GPU2D_Soft.cpp
++++ b/src/GPU2D_Soft.cpp
+@@ -325,10 +325,17 @@ void SoftRenderer2D::DrawScanline_BGOBJ(u32 line, u32* dst)
+             *(u64*)&BGOBJLine[i] = 0;
+     }
+ 
+-    if (GPU2D.DispCnt & 0xE000)
+-        GPU2D.CalculateWindowMask(WindowMask, OBJWindow);
++    if (WideEdge >= 0)
++        memset(WindowMask, WideEdge, 256);
+     else
+-        memset(WindowMask, 0xFF, 256);
++    {
++        if (GPU2D.DispCnt & 0xE000)
++            GPU2D.CalculateWindowMask(WindowMask, OBJWindow);
++        else
++            memset(WindowMask, 0xFF, 256);
++        EdgeMask[0] = WindowMask[0];
++        EdgeMask[1] = WindowMask[255];
++    }
+ 
+     ApplySpriteMosaicX();
+     CurBGXMosaicTable = MosaicTable[GPU2D.BGMosaicSize[0]].data();
+@@ -389,6 +396,8 @@ void SoftRenderer2D::DrawBG_Text(u32 line, u32 bgnum)
+     asm volatile ("" : : : "memory");
+ 
+     u16 bgcnt = GPU2D.BGCnt[bgnum];
++    // recomp widescreen: a 256-wide text BG just repeats past the edge, so leave it out of the margins
++    if (WideEdge >= 0 && (WideSkip >> bgnum & 1)) return;
+ 
+     u32 tilesetaddr, tilemapaddr;
+     u16* pal;
+@@ -442,6 +451,15 @@ void SoftRenderer2D::DrawBG_Text(u32 line, u32 bgnum)
+     else
+         tilemapaddr += ((yoff & 0xF8) << 3);
+ 
++    // recomp widescreen: a 256-wide text BG just repeats past the edge, so it stays out of the margins, unless this
++    // row of its map is one tile repeated (full-screen tints like the night-time dimming), which repeats seamlessly
++    if (WideEdge >= 0 && !(bgcnt & 0x4000))
++    {
++        u16 t0 = *(u16*)&bgvram[tilemapaddr & bgvrammask];
++        for (int i = 1; i < 32; i++)
++            if (*(u16*)&bgvram[(tilemapaddr + i * 2) & bgvrammask] != t0) return;
++    }
++
+     u16 curtile;
+     u16* curpal;
+     u32 pixelsaddr;
+@@ -559,6 +577,7 @@ template<bool mosaic>
+ void SoftRenderer2D::DrawBG_Affine(u32 line, u32 bgnum)
+ {
+     u16 bgcnt = GPU2D.BGCnt[bgnum];
++    if (WideEdge >= 0) return;   // recomp widescreen: rotated/bitmap layers stay 4:3
+ 
+     u32 tilesetaddr, tilemapaddr;
+     u16* pal;
+@@ -648,6 +667,7 @@ template<bool mosaic>
+ void SoftRenderer2D::DrawBG_Extended(u32 line, u32 bgnum)
+ {
+     u16 bgcnt = GPU2D.BGCnt[bgnum];
++    if (WideEdge >= 0) return;   // recomp widescreen: rotated/bitmap layers stay 4:3
+ 
+     u32 tilesetaddr, tilemapaddr;
+     u16* pal;
+@@ -856,6 +876,7 @@ template<bool mosaic>
+ void SoftRenderer2D::DrawBG_Large(u32 line) // BG is always BG2
+ {
+     u16 bgcnt = GPU2D.BGCnt[2];
++    if (WideEdge >= 0) return;   // recomp widescreen: rotated/bitmap layers stay 4:3
+ 
+     u16* pal;
+ 
+diff --git a/src/GPU2D_Soft.h b/src/GPU2D_Soft.h
+index 548efe1..fed5656 100644
+--- a/src/GPU2D_Soft.h
++++ b/src/GPU2D_Soft.h
+@@ -54,6 +54,11 @@ private:
+     alignas(8) u32 BGOBJLine[256*2];
+ 
+     alignas(8) u8 WindowMask[256];
++public:
++    int WideSkip = 0;           // recomp widescreen: BG layers left out of the margins (static overlays)
++    int WideEdge = -1;          // recomp widescreen: -1 normal, else fill window mask with this value
++    u8 EdgeMask[2] = {0xFF, 0xFF};  // window mask at x=0 and x=255 from the last normal line
++private:
+ 
+     alignas(8) u32 OBJLine[256];
+     alignas(8) u8 OBJWindow[256];
+diff --git a/src/GPU3D.cpp b/src/GPU3D.cpp
+index 3272a34..ca8ced3 100644
+--- a/src/GPU3D.cpp
++++ b/src/GPU3D.cpp
+@@ -1,3 +1,4 @@
++#include <cstdlib>
+ /*
+     Copyright 2016-2026 melonDS team
+ 
+@@ -789,11 +790,15 @@ void GPU3D::StallPolygonPipeline(s32 delay, s32 nonstalldelay) noexcept
+ 
+ 
+ 
++// recomp widescreen: the X clip planes sit at +-W * s_clipNum/256 (256 = normal 4:3 view)
++static int s_clipNum = 256;
++template<int comp> static inline s64 ClipLim(s32 w) { return comp == 0 ? ((s64)w * s_clipNum) / 256 : (s64)w; }
++
+ template<int comp, s32 plane, bool attribs>
+ void ClipSegment(Vertex* outbuf, Vertex* vin, Vertex* vout)
+ {
+-    s64 factor_num = vin->Position[3] - (plane*vin->Position[comp]);
+-    s32 factor_den = factor_num - (vout->Position[3] - (plane*vout->Position[comp]));
++    s64 factor_num = ClipLim<comp>(vin->Position[3]) - (plane*(s64)vin->Position[comp]);
++    s64 factor_den = factor_num - (ClipLim<comp>(vout->Position[3]) - (plane*(s64)vout->Position[comp]));
+ 
+ #define INTERPOLATE(var)  { outbuf->var = (vin->var + ((vout->var - vin->var) * factor_num) / factor_den); }
+ 
+@@ -801,7 +806,7 @@ void ClipSegment(Vertex* outbuf, Vertex* vin, Vertex* vout)
+     if (comp != 1) INTERPOLATE(Position[1]);
+     if (comp != 2) INTERPOLATE(Position[2]);
+     INTERPOLATE(Position[3]);
+-    outbuf->Position[comp] = plane*outbuf->Position[3];
++    outbuf->Position[comp] = (s32)(plane*ClipLim<comp>(outbuf->Position[3]));
+ 
+     if (attribs)
+     {
+@@ -837,19 +842,19 @@ int ClipAgainstPlane(const GPU3D& gpu, Vertex* vertices, int nverts, int clipsta
+         next = i+1; if (next >= nverts) next = 0;
+ 
+         Vertex vtx = vertices[i];
+-        if (vtx.Position[comp] > vtx.Position[3])
++        if (vtx.Position[comp] > ClipLim<comp>(vtx.Position[3]))
+         {
+             if ((comp == 2) && (!(gpu.CurPolygonAttr & (1<<12)))) return 0;
+ 
+             Vertex* vprev = &vertices[prev];
+-            if (vprev->Position[comp] <= vprev->Position[3])
++            if (vprev->Position[comp] <= ClipLim<comp>(vprev->Position[3]))
+             {
+                 ClipSegment<comp, 1, attribs>(&temp[c], &vtx, vprev);
+                 c++;
+             }
+ 
+             Vertex* vnext = &vertices[next];
+-            if (vnext->Position[comp] <= vnext->Position[3])
++            if (vnext->Position[comp] <= ClipLim<comp>(vnext->Position[3]))
+             {
+                 ClipSegment<comp, 1, attribs>(&temp[c], &vtx, vnext);
+                 c++;
+@@ -866,17 +871,17 @@ int ClipAgainstPlane(const GPU3D& gpu, Vertex* vertices, int nverts, int clipsta
+         next = i+1; if (next >= nverts) next = 0;
+ 
+         Vertex vtx = temp[i];
+-        if (vtx.Position[comp] < -vtx.Position[3])
++        if (vtx.Position[comp] < -ClipLim<comp>(vtx.Position[3]))
+         {
+             Vertex* vprev = &temp[prev];
+-            if (vprev->Position[comp] >= -vprev->Position[3])
++            if (vprev->Position[comp] >= -ClipLim<comp>(vprev->Position[3]))
+             {
+                 ClipSegment<comp, -1, attribs>(&vertices[c], &vtx, vprev);
+                 c++;
+             }
+ 
+             Vertex* vnext = &temp[next];
+-            if (vnext->Position[comp] >= -vnext->Position[3])
++            if (vnext->Position[comp] >= -ClipLim<comp>(vnext->Position[3]))
+             {
+                 ClipSegment<comp, -1, attribs>(&vertices[c], &vtx, vnext);
+                 c++;
+@@ -912,6 +917,8 @@ int ClipPolygon(GPU3D& gpu, Vertex* vertices, int nverts, int clipstart)
+     // some vertices that should get Y=-0x1000 get Y=0x1000 for some reason on hardware. it doesn't make sense.
+     // clipping seems to process the Y plane before the X plane.
+ 
++    s_clipNum = 256 + 2 * gpu.WideMargin3D;
++
+     // Z clipping
+     nverts = ClipAgainstPlane<2, attribs>(gpu, vertices, nverts, clipstart);
+ 
+@@ -1122,6 +1129,12 @@ void GPU3D::SubmitPolygon() noexcept
+ 
+         vtx->FinalPosition[0] = posX & 0x1FF;
+         vtx->FinalPosition[1] = posY & 0xFF;
++        if (WideMargin3D)
++        {
++            // wide view: signed X from -margin to 255+margin (the rasterizer clamps each pass to its window)
++            s32 ww = vtx->Position[3];
++            vtx->FinalPosition[0] = ww ? (s32)((((s64)vtx->Position[0] + ww) * (s64)Viewport[4]) / ((s64)ww << 1) + (s64)Viewport[0]) : 0;
++        }
+ 
+         // hi-res positions
+         // to consider: only do this when using the GL renderer? apply the aforementioned quirk to this?
+diff --git a/src/GPU3D.h b/src/GPU3D.h
+index 73eff2f..370183f 100644
+--- a/src/GPU3D.h
++++ b/src/GPU3D.h
+@@ -214,6 +214,7 @@ public:
+     bool ClipMatrixDirty = false;
+ 
+     u32 Viewport[6] {};
++    int WideMargin3D = 0;   // recomp widescreen: extra pixels each side the 3D scene is clipped/rendered to
+ 
+     s32 ProjMatrixStack[16] {};
+     s32 PosMatrixStack[32][16] {};
+diff --git a/src/GPU3D_Soft.cpp b/src/GPU3D_Soft.cpp
+index e620270..f43a586 100644
+--- a/src/GPU3D_Soft.cpp
++++ b/src/GPU3D_Soft.cpp
+@@ -1,3 +1,4 @@
++#include <cstdlib>
+ /*
+     Copyright 2016-2026 melonDS team
+ 
+@@ -623,7 +624,7 @@ void SoftRenderer3D::SetupPolygonLeftEdge(SoftRenderer3D::RendererPolygon* rp, s
+         }
+     }
+ 
+-    rp->XL = rp->SlopeL.Setup(polygon->Vertices[rp->CurVL]->FinalPosition[0], polygon->Vertices[rp->NextVL]->FinalPosition[0],
++    rp->XL = rp->SlopeL.Setup(polygon->Vertices[rp->CurVL]->FinalPosition[0] + XShift, polygon->Vertices[rp->NextVL]->FinalPosition[0] + XShift,
+                               polygon->Vertices[rp->CurVL]->FinalPosition[1], polygon->Vertices[rp->NextVL]->FinalPosition[1],
+                               polygon->FinalW[rp->CurVL], polygon->FinalW[rp->NextVL], y, polygon->WBuffer);
+ }
+@@ -650,7 +651,7 @@ void SoftRenderer3D::SetupPolygonRightEdge(SoftRenderer3D::RendererPolygon* rp,
+         }
+     }
+ 
+-    rp->XR = rp->SlopeR.Setup(polygon->Vertices[rp->CurVR]->FinalPosition[0], polygon->Vertices[rp->NextVR]->FinalPosition[0],
++    rp->XR = rp->SlopeR.Setup(polygon->Vertices[rp->CurVR]->FinalPosition[0] + XShift, polygon->Vertices[rp->NextVR]->FinalPosition[0] + XShift,
+                               polygon->Vertices[rp->CurVR]->FinalPosition[1], polygon->Vertices[rp->NextVR]->FinalPosition[1],
+                               polygon->FinalW[rp->CurVR], polygon->FinalW[rp->NextVR], y, polygon->WBuffer);
+ }
+@@ -688,18 +689,18 @@ void SoftRenderer3D::SetupPolygon(SoftRenderer3D::RendererPolygon* rp, Polygon*
+         int i;
+ 
+         i = 1;
+-        if (polygon->Vertices[i]->FinalPosition[0] < polygon->Vertices[vtop]->FinalPosition[0]) vtop = i;
+-        if (polygon->Vertices[i]->FinalPosition[0] > polygon->Vertices[vbot]->FinalPosition[0]) vbot = i;
++        if (polygon->Vertices[i]->FinalPosition[0] + XShift < polygon->Vertices[vtop]->FinalPosition[0] + XShift) vtop = i;
++        if (polygon->Vertices[i]->FinalPosition[0] + XShift > polygon->Vertices[vbot]->FinalPosition[0] + XShift) vbot = i;
+ 
+         i = nverts - 1;
+-        if (polygon->Vertices[i]->FinalPosition[0] < polygon->Vertices[vtop]->FinalPosition[0]) vtop = i;
+-        if (polygon->Vertices[i]->FinalPosition[0] > polygon->Vertices[vbot]->FinalPosition[0]) vbot = i;
++        if (polygon->Vertices[i]->FinalPosition[0] + XShift < polygon->Vertices[vtop]->FinalPosition[0] + XShift) vtop = i;
++        if (polygon->Vertices[i]->FinalPosition[0] + XShift > polygon->Vertices[vbot]->FinalPosition[0] + XShift) vbot = i;
+ 
+         rp->CurVL = vtop; rp->NextVL = vtop;
+         rp->CurVR = vbot; rp->NextVR = vbot;
+ 
+-        rp->XL = rp->SlopeL.SetupDummy(polygon->Vertices[rp->CurVL]->FinalPosition[0], polygon->WBuffer);
+-        rp->XR = rp->SlopeR.SetupDummy(polygon->Vertices[rp->CurVR]->FinalPosition[0], polygon->WBuffer);
++        rp->XL = rp->SlopeL.SetupDummy(polygon->Vertices[rp->CurVL]->FinalPosition[0] + XShift, polygon->WBuffer);
++        rp->XR = rp->SlopeR.SetupDummy(polygon->Vertices[rp->CurVR]->FinalPosition[0] + XShift, polygon->WBuffer);
+     }
+     else
+     {
+@@ -793,10 +794,10 @@ void SoftRenderer3D::RenderShadowMaskScanline(RendererPolygon* rp, s32 y)
+         else
+         {
+             l_filledge = (rp->SlopeR.Negative || !rp->SlopeR.XMajor)
+-                || (y == polygon->YBottom-1) && rp->SlopeR.XMajor && (vlnext->FinalPosition[0] != vrnext->FinalPosition[0]);
++                || (y == polygon->YBottom-1) && rp->SlopeR.XMajor && (vlnext->FinalPosition[0] + XShift != vrnext->FinalPosition[0] + XShift);
+             r_filledge = (!rp->SlopeL.Negative && rp->SlopeL.XMajor)
+                 || (!(rp->SlopeL.Negative && rp->SlopeL.XMajor) && rp->SlopeR.Increment==0)
+-                || (y == polygon->YBottom-1) && rp->SlopeL.XMajor && (vlnext->FinalPosition[0] != vrnext->FinalPosition[0]);
++                || (y == polygon->YBottom-1) && rp->SlopeL.XMajor && (vlnext->FinalPosition[0] + XShift != vrnext->FinalPosition[0] + XShift);
+         }
+     }
+     else
+@@ -821,10 +822,10 @@ void SoftRenderer3D::RenderShadowMaskScanline(RendererPolygon* rp, s32 y)
+         else
+         {
+             l_filledge = ((rp->SlopeL.Negative || !rp->SlopeL.XMajor)
+-                || (y == polygon->YBottom-1) && rp->SlopeL.XMajor && (vlnext->FinalPosition[0] != vrnext->FinalPosition[0]))
++                || (y == polygon->YBottom-1) && rp->SlopeL.XMajor && (vlnext->FinalPosition[0] + XShift != vrnext->FinalPosition[0] + XShift))
+                 || (rp->SlopeL.Increment == rp->SlopeR.Increment) && (xstart+l_edgelen == xend+1);
+             r_filledge = (!rp->SlopeR.Negative && rp->SlopeR.XMajor) || (rp->SlopeR.Increment==0)
+-                || (y == polygon->YBottom-1) && rp->SlopeR.XMajor && (vlnext->FinalPosition[0] != vrnext->FinalPosition[0]);
++                || (y == polygon->YBottom-1) && rp->SlopeR.XMajor && (vlnext->FinalPosition[0] + XShift != vrnext->FinalPosition[0] + XShift);
+         }
+     }
+ 
+@@ -1028,10 +1029,10 @@ void SoftRenderer3D::RenderPolygonScanline(RendererPolygon* rp, s32 y)
+         else
+         {
+             l_filledge = (rp->SlopeR.Negative || !rp->SlopeR.XMajor)
+-                || (y == polygon->YBottom-1) && rp->SlopeR.XMajor && (vlnext->FinalPosition[0] != vrnext->FinalPosition[0]);
++                || (y == polygon->YBottom-1) && rp->SlopeR.XMajor && (vlnext->FinalPosition[0] + XShift != vrnext->FinalPosition[0] + XShift);
+             r_filledge = (!rp->SlopeL.Negative && rp->SlopeL.XMajor)
+                 || (!(rp->SlopeL.Negative && rp->SlopeL.XMajor) && rp->SlopeR.Increment==0)
+-                || (y == polygon->YBottom-1) && rp->SlopeL.XMajor && (vlnext->FinalPosition[0] != vrnext->FinalPosition[0]);
++                || (y == polygon->YBottom-1) && rp->SlopeL.XMajor && (vlnext->FinalPosition[0] + XShift != vrnext->FinalPosition[0] + XShift);
+         }
+     }
+     else
+@@ -1063,10 +1064,10 @@ void SoftRenderer3D::RenderPolygonScanline(RendererPolygon* rp, s32 y)
+         else
+         {
+             l_filledge = ((rp->SlopeL.Negative || !rp->SlopeL.XMajor)
+-                || (y == polygon->YBottom-1) && rp->SlopeL.XMajor && (vlnext->FinalPosition[0] != vrnext->FinalPosition[0]))
++                || (y == polygon->YBottom-1) && rp->SlopeL.XMajor && (vlnext->FinalPosition[0] + XShift != vrnext->FinalPosition[0] + XShift))
+                 || (rp->SlopeL.Increment == rp->SlopeR.Increment) && (xstart+l_edgelen == xend+1);
+             r_filledge = (!rp->SlopeR.Negative && rp->SlopeR.XMajor) || (rp->SlopeR.Increment==0)
+-                || (y == polygon->YBottom-1) && rp->SlopeR.XMajor && (vlnext->FinalPosition[0] != vrnext->FinalPosition[0]);
++                || (y == polygon->YBottom-1) && rp->SlopeR.XMajor && (vlnext->FinalPosition[0] + XShift != vrnext->FinalPosition[0] + XShift);
+         }
+     }
+ 
+@@ -1711,6 +1712,33 @@ void SoftRenderer3D::ClearBuffers()
+ 
+ void SoftRenderer3D::RenderPolygons(bool threaded, Polygon** polygons, int npolys)
+ {
++    const int M = GPU3D.WideMargin3D;
++    if (M > 0 && M <= 64)
++    {
++        // recomp widescreen: render the scene twice more, shifted a screen width right/left, and keep the strips that
++        // land beyond the 4:3 edges. Then the normal pass below leaves the buffers as the real 256-wide picture.
++        for (int side = 0; side < 2; side++)
++        {
++            XShift = side == 0 ? 256 : -256;
++            int k = 0;
++            for (int i = 0; i < npolys; i++)
++            {
++                if (polygons[i]->Degenerate) continue;
++                SetupPolygon(&PolygonList[k++], polygons[i]);
++            }
++            RenderScanline(0, k);
++            for (s32 y = 1; y < 192; y++) { RenderScanline(y, k); ScanlineFinalPass(y - 1); }
++            ScanlineFinalPass(191);
++            for (int y = 0; y < 192; y++)
++            {
++                const u32* row = &ColorBuffer[(y * ScanlineWidth) + FirstPixelOffset];
++                memcpy(WideLines[side][y], side == 0 ? row + 256 - M : row, M * 4);
++            }
++            ClearBuffers();
++        }
++        XShift = 0;
++    }
++
+     int j = 0;
+     for (int i = 0; i < npolys; i++)
+     {
+diff --git a/src/GPU3D_Soft.h b/src/GPU3D_Soft.h
+index f6034f2..d283960 100644
+--- a/src/GPU3D_Soft.h
++++ b/src/GPU3D_Soft.h
+@@ -493,6 +493,10 @@ private:
+     bool FrameIdentical;
+ 
+     u32 ScrolledLine[256];
++public:
++    s32 XShift = 0;                    // recomp widescreen: added to every screen X while rendering a margin pass
++    u32 WideLines[2][192][64] = {};    // recomp widescreen: 3D margins, [0] = left (x -M..-1), [1] = right (x 256..255+M)
++private:
+ 
+     // threading
+ 
+diff --git a/src/GPU_Soft.cpp b/src/GPU_Soft.cpp
+index 861c1a6..b0eff2f 100644
+--- a/src/GPU_Soft.cpp
++++ b/src/GPU_Soft.cpp
+@@ -1,3 +1,5 @@
++#include <cstdio>
++#include <cstdlib>
+ /*
+     Copyright 2016-2026 melonDS team
+ 
+@@ -19,6 +21,7 @@
+ #include "NDS.h"
+ #include "GPU_Soft.h"
+ #include "GPU_ColorOp.h"
++#include "GPU3D_Soft.h"
+ 
+ namespace melonDS
+ {
+@@ -109,6 +112,7 @@ void SoftRenderer::DrawScanline(u32 line)
+ 
+     // the position used for drawing operations is based on VCOUNT
+     line = GPU.VCount;
++    if (line == 0) GPU.GPU3D.WideMargin3D = WideMargin > 0 && WideMargin <= 64 ? WideMargin : 0;   // recomp: wide 3D
+     if (line < 192)
+     {
+         // retrieve 3D output
+@@ -125,6 +129,9 @@ void SoftRenderer::DrawScanline(u32 line)
+         // perform display capture if enabled
+         if (GPU.CaptureEnable)
+             DoCapture(line);
++
++        if (WideMargin > 0 && GPU.ScreensEnabled)
++            DrawWideMargins(line);
+     }
+     else
+     {
+@@ -444,6 +451,80 @@ void SoftRenderer::ExpandColor(u32* dst)
+ }
+ 
+ 
++// Recomp widescreen: re-render this line with every scroll and sprite position moved
++// left/right, so the game's own map and sprites fill the area beyond the 256-pixel edge.
++void SoftRenderer::DrawWideMargins(u32 line)
++{
++    const int W = WideMargin;
++    melonDS::GPU2D* units[2] = {&GPU.GPU2D_A, &GPU.GPU2D_B};
++    SoftRenderer2D* rends[2] = {(SoftRenderer2D*)Rend2D_A.get(), (SoftRenderer2D*)Rend2D_B.get()};
++    u16 savedX[2][4];
++    u16 savedOAMX[2][128];
++    u32* real3D = Output3D;
++    for (int side = 0; side < 2; side++)
++    {
++        int delta = side == 0 ? -W : 256;          // left margin shows x in [-W,0); right shows [256, 256+W)
++        for (int e = 0; e < 2; e++)
++        {
++            melonDS::GPU2D& u = *units[e];
++            // a 512-wide layer parked at scroll 0,0 is a static overlay (dungeon minimap, menus): its off-screen
++            // half holds leftovers, so keep it out of the margins
++            rends[e]->WideSkip = 0;
++            for (int k = 0; k < 4; k++) if (u.BGXPos[k] == 0 && u.BGYPos[k] == 0) rends[e]->WideSkip |= 1 << k;
++            for (int k = 0; k < 4; k++) { savedX[e][k] = u.BGXPos[k]; u.BGXPos[k] = (u16)(u.BGXPos[k] + delta); }
++            u16* oam = (u16*)&GPU.OAM[e ? 0x400 : 0];
++            for (int s = 0; s < 128; s++)
++            {
++                u16& a1 = oam[s * 4 + 1];
++                savedOAMX[e][s] = a1;
++                a1 = (a1 & ~0x1FF) | ((a1 - delta) & 0x1FF);
++            }
++            rends[e]->WideEdge = rends[e]->EdgeMask[side];
++        }
++        // 3D layer: the 3D renderer draws the scene wide (GPU3D.WideMargin3D), so the margins get real 3D pixels
++        {
++            auto* r3d = dynamic_cast<SoftRenderer3D*>(Rend3D.get());
++            memset(WideLine3D, 0, sizeof(WideLine3D));
++            if (r3d && GPU.GPU3D.WideMargin3D == W) memcpy(WideLine3D, r3d->WideLines[side][line], W * 4);
++            // full-screen translucent tints drawn as an exactly-4:3 quad (fades, night): carry them on where the
++            // wide render has nothing
++            u32 edge = real3D ? real3D[side == 0 ? 0 : 255] : 0, ea = (edge >> 24) & 0x1F;
++            bool uniform = real3D && real3D[0] == real3D[64] && real3D[0] == real3D[128] && real3D[0] == real3D[192] && real3D[0] == real3D[255];
++            if (uniform && ea > 0 && ea < 31)
++                for (int i = 0; i < W; i++) if (!((WideLine3D[i] >> 24) & 0x1F)) WideLine3D[i] = edge;
++        }
++        Output3D = WideLine3D;
++        rends[0]->DrawSprites(line);
++        rends[1]->DrawSprites(line);
++        rends[0]->DrawScanline(line);
++        rends[1]->DrawScanline(line);
++        alignas(8) u32 tA[256], tB[256];
++        DrawScanlineA(line, tA);
++        DrawScanlineB(line, tB);
++        ExpandColor(tA);
++        ExpandColor(tB);
++        int scrA = GPU.ScreenSwap ? 0 : 1;
++        memcpy(&WideSide[BackBuffer][scrA][side][line * W], tA, W * 4);
++        memcpy(&WideSide[BackBuffer][scrA ^ 1][side][line * W], tB, W * 4);
++        for (int e = 0; e < 2; e++)
++        {
++            melonDS::GPU2D& u = *units[e];
++            for (int k = 0; k < 4; k++) u.BGXPos[k] = savedX[e][k];
++            u16* oam = (u16*)&GPU.OAM[e ? 0x400 : 0];
++            for (int s = 0; s < 128; s++) oam[s * 4 + 1] = savedOAMX[e][s];
++            rends[e]->WideEdge = -1;
++        }
++    }
++    Output3D = real3D;
++}
++
++void SoftRenderer::GetWideMargins(int screen, u32** left, u32** right)
++{
++    int frontbuf = BackBuffer ^ 1;
++    *left = WideSide[frontbuf][screen][0];
++    *right = WideSide[frontbuf][screen][1];
++}
++
+ bool SoftRenderer::GetFramebuffers(void** top, void** bottom)
+ {
+     int frontbuf = BackBuffer ^ 1;
+diff --git a/src/GPU_Soft.h b/src/GPU_Soft.h
+index d6396af..0076498 100644
+--- a/src/GPU_Soft.h
++++ b/src/GPU_Soft.h
+@@ -51,6 +51,12 @@ public:
+ 
+     bool GetFramebuffers(void** top, void** bottom) override;
+ 
++    // recomp widescreen: extra columns either side of each screen (0 = off, max 128)
++    int WideMargin = 0;
++    bool WideExtend3D = true;     // stretch translucent 3D edge pixels into the margins (dungeon darkness)
++    // left/right margin pixels of the front buffer for screen 0 (top) / 1 (bottom), W*192 each
++    void GetWideMargins(int screen, u32** left, u32** right);
++
+ private:
+     friend class SoftRenderer2D;
+     friend class SoftRenderer3D;
+@@ -67,6 +73,10 @@ private:
+ 
+     void ApplyMasterBrightness(u16 regval, u32* dst);
+     void ExpandColor(u32* dst);
++    void DrawWideMargins(u32 line);
++    u32 WideSide[2][2][2][128 * 192] = {};   // [buffer][screen][side][x + line*W]
++    alignas(8) u32 ZeroLine3D[256] = {};
++    alignas(8) u32 WideLine3D[256] = {};
+ };
+ 
+ }
+diff --git a/src/NDS.cpp b/src/NDS.cpp
+index cd88ec2..f94fa37 100644
+--- a/src/NDS.cpp
++++ b/src/NDS.cpp
+@@ -2092,8 +2092,10 @@ u16 NDS::ARM9Read16(u32 addr)
+     return 0;
+ }
+ 
++void (*ARM9ReadWatch)(u32, int) = nullptr;
+ u32 NDS::ARM9Read32(u32 addr)
+ {
++    if (ARM9ReadWatch) ARM9ReadWatch(addr, 4);
+     addr &= ~0x3;
+ 
+     if ((addr & 0xFFFFF000) == 0xFFFF0000)
+@@ -2155,8 +2157,10 @@ u32 NDS::ARM9Read32(u32 addr)
+     return 0;
+ }
+ 
++void (*ARM9WriteWatch)(u32, u32, int) = nullptr;
+ void NDS::ARM9Write8(u32 addr, u8 val)
+ {
++    if (ARM9WriteWatch) ARM9WriteWatch(addr, val, 1);
+     switch (addr & 0xFF000000)
+     {
+     case 0x02000000:
+@@ -2196,6 +2200,7 @@ void NDS::ARM9Write8(u32 addr, u8 val)
+ 
+ void NDS::ARM9Write16(u32 addr, u16 val)
+ {
++    if (ARM9WriteWatch) ARM9WriteWatch(addr, val, 2);
+     addr &= ~0x1;
+ 
+     switch (addr & 0xFF000000)
+@@ -2256,6 +2261,7 @@ void NDS::ARM9Write16(u32 addr, u16 val)
+ 
+ void NDS::ARM9Write32(u32 addr, u32 val)
+ {
++    if (ARM9WriteWatch) ARM9WriteWatch(addr, val, 4);
+     addr &= ~0x3;
+ 
+     switch (addr & 0xFF000000)
+diff --git a/src/Savestate.cpp b/src/Savestate.cpp
+index c2f01f7..a31f91b 100644
+--- a/src/Savestate.cpp
++++ b/src/Savestate.cpp
+@@ -16,6 +16,7 @@
+     with melonDS. If not, see http://www.gnu.org/licenses/.
+ */
+ 
++#include <cstdlib>
+ #include <stdio.h>
+ #include <cassert>
+ #include <cstring>
