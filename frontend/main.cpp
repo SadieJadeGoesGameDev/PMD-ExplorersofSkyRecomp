@@ -389,7 +389,7 @@ int main(int argc, char **argv) {
     Platform::g_save_path = save_path;
     rec_start(dir, save);
     std::string save_name = save_path.substr(save_path.find_last_of("/\\") + 1);
-    std::string title = std::string("Explorers of Sky - Sky Recomp v0.7.2 - slot ") + std::to_string(S.save_slot) + " - " +
+    std::string title = std::string("Explorers of Sky - Sky Recomp v0.7.3 - slot ") + std::to_string(S.save_slot) + " - " +
                         (save.empty() ? "new save: " : "save loaded: ") + save_name;
 
     // ---- set up the DS
@@ -438,6 +438,9 @@ int main(int argc, char **argv) {
     SDL_Texture *tex_bot = SDL_CreateTexture(ren, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, FW, 192);
     SDL_Texture *tex_hi = SDL_CreateTexture(ren, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, HI_W, 2160);
     SDL_SetTextureScaleMode(tex_hi, SDL_ScaleModeLinear);
+    SDL_SetTextureScaleMode(tex_top, SDL_ScaleModeNearest);
+    SDL_SetTextureScaleMode(tex_bot, SDL_ScaleModeNearest);
+    SDL_Texture *tex_up = nullptr; int up_w = 0, up_h = 0;   // whole-number upscale target (filter Off)
     int hi_w = 0, hi_h = 0;               // size of the filtered image currently in tex_hi (0 = none yet)
     SDL_Texture *gear_tex = make_gear_texture(ren);
     int gear_seen = Platform::g_save_writes; uint64_t gear_start = 0; bool gear_on = false;
@@ -756,13 +759,38 @@ int main(int argc, char **argv) {
                 SDL_RenderFillRect(ren, &frame);
                 SDL_RenderCopy(ren, show_top ? tex_bot : tex_top, &psrc, &r);
             }
-        } else if (layout == STACKED) {
-            SDL_Rect a{0, 0, vw, 192}, b{0, 192, vw, 192};
-            SDL_RenderCopy(ren, tex_top, &src, &a);
-            SDL_RenderCopy(ren, tex_bot, &src, &b);
         } else {
-            SDL_RenderCopy(ren, show_top ? tex_top : tex_bot, &src, nullptr);
-            if (pip) {
+            // Filter Off: "sharp bilinear" on the graphics card. Blow the picture up to a whole-number size with
+            // nearest neighbour, then smooth-scale that to the window, so every DS pixel comes out the same width
+            // (5.625x would make some 1-pixel lines 5 and some 6 screen pixels wide).
+            int lw, lh; SDL_RenderGetLogicalSize(ren, &lw, &lh);
+            int ow, oh; SDL_GetRendererOutputSize(ren, &ow, &oh);
+            const int vhh = layout == STACKED ? 384 : 192;
+            int K = (oh + vhh - 1) / vhh; if (K < 1) K = 1;
+            while (K > 1 && (vw * K > 4096 || vhh * K > 4096)) K--;
+            if (!tex_up || up_w != vw * K || up_h != vhh * K) {
+                if (tex_up) SDL_DestroyTexture(tex_up);
+                up_w = vw * K; up_h = vhh * K;
+                tex_up = SDL_CreateTexture(ren, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_TARGET, up_w, up_h);
+                if (tex_up) SDL_SetTextureScaleMode(tex_up, SDL_ScaleModeLinear);
+            }
+            if (tex_up) {
+                SDL_RenderSetLogicalSize(ren, 0, 0);
+                SDL_SetRenderTarget(ren, tex_up);
+                if (layout == STACKED) {
+                    SDL_Rect a{0, 0, up_w, 192 * K}, b{0, 192 * K, up_w, 192 * K};
+                    SDL_RenderCopy(ren, tex_top, &src, &a);
+                    SDL_RenderCopy(ren, tex_bot, &src, &b);
+                } else SDL_RenderCopy(ren, show_top ? tex_top : tex_bot, &src, nullptr);
+                SDL_SetRenderTarget(ren, nullptr);
+                SDL_RenderSetLogicalSize(ren, lw, lh);
+                SDL_RenderCopy(ren, tex_up, nullptr, nullptr);
+            } else if (layout == STACKED) {
+                SDL_Rect a{0, 0, vw, 192}, b{0, 192, vw, 192};
+                SDL_RenderCopy(ren, tex_top, &src, &a);
+                SDL_RenderCopy(ren, tex_bot, &src, &b);
+            } else SDL_RenderCopy(ren, show_top ? tex_top : tex_bot, &src, nullptr);
+            if (layout == SINGLE && pip) {
                 SDL_Rect r{vw - 88, 4, 84, 63}, frame{r.x - 1, r.y - 1, r.w + 2, r.h + 2};
                 SDL_Rect psrc{WM, 0, 256, 192};
                 SDL_SetRenderDrawColor(ren, 255, 255, 255, 255);

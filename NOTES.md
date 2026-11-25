@@ -192,3 +192,6 @@
 - Rig, 1200 dungeon frames on 2 cores: 11.1 s -> about 8.4 s, pixel-identical.
 - Filters: per-column sharp-bilinear tables (smooth, crt expand); output identical.
 - Portrait move: only pixels that change when the windows are masked are captured, so there is no scenery halo.
+
+## v0.7.3
+- Filter Off now uses sharp bilinear on the GPU: nearest-neighbour upscale into a render target at a whole-number factor K = ceil(out_h/vh) (capped at 4096), then a linear scale to the window. Every DS pixel is the same width (1080/192 = 5.625x had made 1-px minimap lines 5 or 6 px). Not testable in the Linux rig (SDL path).
