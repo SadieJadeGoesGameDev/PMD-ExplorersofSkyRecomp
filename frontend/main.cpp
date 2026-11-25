@@ -34,6 +34,7 @@ void recomp_install(NDS *);
 extern "C" void sadie_sync(void);
 extern "C" int recomp_quicksave_prepare(void);
 extern "C" void recomp_quickload_reset(void);
+extern "C" void recomp_portrait_move(int *);
 extern "C" int recomp_menu_busy(void);
 extern "C" void recomp_menu_reset(void);
 extern "C" int recomp_overlay_loaded(int ov);
@@ -166,8 +167,7 @@ static void settings_load() {
         char k[64]; int v;
         if (sscanf(line, " %63[^= ] = %d", k, &v) != 2) continue;
         std::string key = k;
-        if (key == "widescreen") S.widescreen = v != 0;
-        else if (key == "filter") S.filter = v >= 0 && v < FILTER_COUNT ? v : 0;
+        if (key == "filter") S.filter = v >= 0 && v < FILTER_COUNT ? v : 0;
         else if (key == "display") S.display = v >= 0 && v < DISPLAY_COUNT ? v : 0;
         else if (key == "resolution") S.resolution = v >= 0 && v < NUM_RES ? v : 0;
         else if (key == "save_slot") S.save_slot = v >= 1 && v <= 3 ? v : 1;
@@ -181,7 +181,7 @@ static void settings_save() {
     FILE *f = fopen(g_ini_path.c_str(), "w");
     if (!f) return;
     fprintf(f, "; Sky Recomp settings (also changeable in-game: main menu > Recomp Options)\n");
-    fprintf(f, "widescreen = %d\nfilter = %d   ; 0 off, 1 xBRZ, 2 scanlines, 3 smooth, 4 glow, 5 DS screen\ndisplay = %d   ; 0 windowed, 1 borderless fullscreen, 2 fullscreen\n", S.widescreen, S.filter, S.display);
+    fprintf(f, "filter = %d   ; 0 off, 1 xBRZ, 2 scanlines, 3 smooth, 4 glow, 5 DS screen\ndisplay = %d   ; 0 windowed, 1 borderless fullscreen, 2 fullscreen\n", S.filter, S.display);
     fprintf(f, "resolution = %d   ; 0 1280x720, 1 1600x900, 2 1920x1080, 3 2560x1440, 4 3840x2160\nsave_slot = %d\n", S.resolution, S.save_slot);
     fprintf(f, "autosave = %d\n", S.autosave);
     fprintf(f, "; Enhancements\n");
@@ -389,7 +389,7 @@ int main(int argc, char **argv) {
     Platform::g_save_path = save_path;
     rec_start(dir, save);
     std::string save_name = save_path.substr(save_path.find_last_of("/\\") + 1);
-    std::string title = std::string("Explorers of Sky - Sky Recomp v0.6.6 - slot ") + std::to_string(S.save_slot) + " - " +
+    std::string title = std::string("Explorers of Sky - Sky Recomp v0.7.0 - slot ") + std::to_string(S.save_slot) + " - " +
                         (save.empty() ? "new save: " : "save loaded: ") + save_name;
 
     // ---- set up the DS
@@ -535,7 +535,6 @@ int main(int argc, char **argv) {
                     if (e.type == SDL_KEYDOWN && !e.key.repeat) {
                         if (e.key.keysym.sym == SDLK_F1) { layout = layout == SINGLE ? STACKED : SINGLE; apply_layout(); break; }
                         if (e.key.keysym.sym == SDLK_F2) { pip = !pip; break; }
-                        if (e.key.keysym.sym == SDLK_F4) { S.widescreen = !S.widescreen; S.dirty = 1; break; }
 #ifdef SKYRECOMP_DEV   // dev-only keys: quicksave/quickload and the save-gear test (build with DEV=1)
                         if (e.key.keysym.sym == SDLK_F5) { qs_request = 1; break; }
                         if (e.key.keysym.sym == SDLK_F6) { gear_start = SDL_GetPerformanceCounter(); gear_on = true; break; }
@@ -637,6 +636,12 @@ int main(int argc, char **argv) {
         sadie_sync();
         // dungeon darkness is translucent 3D that should carry into the margins; overworld 3D (cloud shadows) must not
         sr->WideExtend3D = recomp_cpu_ready() && recomp_overlay_loaded(29);
+        {   // dialogue portraits sit left of the text box in widescreen
+            int pmv[8]; recomp_portrait_move(pmv);
+            sr->PortMove.on = pmv[0]; sr->PortMove.eng = pmv[1] ? 1 : 0;
+            sr->PortMove.sx = pmv[2]; sr->PortMove.sy = pmv[3]; sr->PortMove.sw = pmv[4]; sr->PortMove.sh = pmv[5];
+            sr->PortMove.dx = pmv[6]; sr->PortMove.dy = pmv[7];
+        }
         if (S.request_exit) running = false;
         if (S.request_slot) {
             // switching save slot: remember it and restart the program on that slot

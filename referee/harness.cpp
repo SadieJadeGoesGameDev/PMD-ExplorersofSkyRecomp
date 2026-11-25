@@ -122,6 +122,7 @@ extern "C" int recomp_wide_margin;
 extern "C" void sadie_sync(void);
 extern "C" int recomp_quicksave_prepare(void);
 extern "C" void recomp_quickload_reset(void);
+extern "C" void recomp_portrait_move(int *);
 extern "C" int recomp_overlay_loaded(int);
 extern "C" int recomp_cpu_ready(void);
 
@@ -258,8 +259,18 @@ int main(int argc, char** argv) {
         }
         if (getenv("RWATCHAT") && i == atoi(getenv("RWATCHAT"))) { g_nds = &nds; grlo = strtoul(getenv("RLO"),0,16); grhi = strtoul(getenv("RHI"),0,16); melonDS::ARM9ReadWatch = grwatch; }
         if (getenv("WATCHAT") && i == atoi(getenv("WATCHAT"))) { g_nds = &nds; gwlo = strtoul(getenv("WLO"),0,16); gwhi = strtoul(getenv("WHI"),0,16); melonDS::ARM9WriteWatch = gwatch; }
+        if (getenv("POKEAT") && i >= atoi(getenv("POKEAT")) && getenv("POKE8")) {   // POKE8="addr:val,addr:val" (hex), every frame from POKEAT
+            char buf[512]; snprintf(buf, sizeof buf, "%s", getenv("POKE8"));
+            for (char* t = strtok(buf, ","); t; t = strtok(nullptr, ",")) { u32 a = strtoul(t, 0, 16); char* c = strchr(t, ':'); if (c) nds.ARM9Write8(a, (u8)strtoul(c + 1, 0, 16)); }
+        }
         if (getenv("STATS") && getenv("RECOMP") && i % 1800 == 0) { fprintf(stderr, "[frame %d] ", i); recomp_stats(stderr); }
         if (getenv("RECOMP")) { sadie_sync(); sr->WideExtend3D = recomp_cpu_ready() && recomp_overlay_loaded(29); }
+        {   // dialogue portraits sit left of the text box in widescreen
+            int pmv[8]; recomp_portrait_move(pmv);
+            sr->PortMove.on = pmv[0]; sr->PortMove.eng = pmv[1] ? 1 : 0;
+            sr->PortMove.sx = pmv[2]; sr->PortMove.sy = pmv[3]; sr->PortMove.sw = pmv[4]; sr->PortMove.sh = pmv[5];
+            sr->PortMove.dx = pmv[6]; sr->PortMove.dy = pmv[7];
+        }
         if (getenv("RESETAT") && i == atoi(getenv("RESETAT"))) recomp_inject_reset = 1;
         if (getenv("RESETAT") && i > atoi(getenv("RESETAT")) && (i - atoi(getenv("RESETAT"))) % 30 == 1 && i < atoi(getenv("RESETAT")) + 400) { fprintf(stderr, "frame %d: ", i); recomp_arm7_state(stderr); }
         nds.RunFrame();

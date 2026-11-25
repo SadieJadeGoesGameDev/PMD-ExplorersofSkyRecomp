@@ -87,10 +87,10 @@ index 54c3a11..54c55e7 100644
  
  namespace melonDS
 diff --git a/src/GPU2D_Soft.cpp b/src/GPU2D_Soft.cpp
-index 5adc545..3bccdbc 100644
+index 5adc545..7755435 100644
 --- a/src/GPU2D_Soft.cpp
 +++ b/src/GPU2D_Soft.cpp
-@@ -325,10 +325,17 @@ void SoftRenderer2D::DrawScanline_BGOBJ(u32 line, u32* dst)
+@@ -325,10 +325,19 @@ void SoftRenderer2D::DrawScanline_BGOBJ(u32 line, u32* dst)
              *(u64*)&BGOBJLine[i] = 0;
      }
  
@@ -107,11 +107,13 @@ index 5adc545..3bccdbc 100644
 +            memset(WindowMask, 0xFF, 256);
 +        EdgeMask[0] = WindowMask[0];
 +        EdgeMask[1] = WindowMask[255];
++        if (MaskBits)
++            for (int i = MaskX0 < 0 ? 0 : MaskX0; i < MaskX1 && i < 256; i++) WindowMask[i] &= ~MaskBits;
 +    }
  
      ApplySpriteMosaicX();
      CurBGXMosaicTable = MosaicTable[GPU2D.BGMosaicSize[0]].data();
-@@ -389,6 +396,8 @@ void SoftRenderer2D::DrawBG_Text(u32 line, u32 bgnum)
+@@ -389,6 +398,8 @@ void SoftRenderer2D::DrawBG_Text(u32 line, u32 bgnum)
      asm volatile ("" : : : "memory");
  
      u16 bgcnt = GPU2D.BGCnt[bgnum];
@@ -120,7 +122,7 @@ index 5adc545..3bccdbc 100644
  
      u32 tilesetaddr, tilemapaddr;
      u16* pal;
-@@ -442,6 +451,15 @@ void SoftRenderer2D::DrawBG_Text(u32 line, u32 bgnum)
+@@ -442,6 +453,15 @@ void SoftRenderer2D::DrawBG_Text(u32 line, u32 bgnum)
      else
          tilemapaddr += ((yoff & 0xF8) << 3);
  
@@ -136,7 +138,7 @@ index 5adc545..3bccdbc 100644
      u16 curtile;
      u16* curpal;
      u32 pixelsaddr;
-@@ -559,6 +577,7 @@ template<bool mosaic>
+@@ -559,6 +579,7 @@ template<bool mosaic>
  void SoftRenderer2D::DrawBG_Affine(u32 line, u32 bgnum)
  {
      u16 bgcnt = GPU2D.BGCnt[bgnum];
@@ -144,7 +146,7 @@ index 5adc545..3bccdbc 100644
  
      u32 tilesetaddr, tilemapaddr;
      u16* pal;
-@@ -648,6 +667,7 @@ template<bool mosaic>
+@@ -648,6 +669,7 @@ template<bool mosaic>
  void SoftRenderer2D::DrawBG_Extended(u32 line, u32 bgnum)
  {
      u16 bgcnt = GPU2D.BGCnt[bgnum];
@@ -152,7 +154,7 @@ index 5adc545..3bccdbc 100644
  
      u32 tilesetaddr, tilemapaddr;
      u16* pal;
-@@ -856,6 +876,7 @@ template<bool mosaic>
+@@ -856,6 +878,7 @@ template<bool mosaic>
  void SoftRenderer2D::DrawBG_Large(u32 line) // BG is always BG2
  {
      u16 bgcnt = GPU2D.BGCnt[2];
@@ -161,15 +163,16 @@ index 5adc545..3bccdbc 100644
      u16* pal;
  
 diff --git a/src/GPU2D_Soft.h b/src/GPU2D_Soft.h
-index 548efe1..fed5656 100644
+index 548efe1..21535a0 100644
 --- a/src/GPU2D_Soft.h
 +++ b/src/GPU2D_Soft.h
-@@ -54,6 +54,11 @@ private:
+@@ -54,6 +54,12 @@ private:
      alignas(8) u32 BGOBJLine[256*2];
  
      alignas(8) u8 WindowMask[256];
 +public:
-+    int WideSkip = 0;           // recomp widescreen: BG layers left out of the margins (static overlays)
++    int WideSkip = 0;
++    int MaskX0 = 0, MaskX1 = 0; u8 MaskBits = 0;   // recomp: layers hidden in a column range (moved portrait)           // recomp widescreen: BG layers left out of the margins (static overlays)
 +    int WideEdge = -1;          // recomp widescreen: -1 normal, else fill window mask with this value
 +    u8 EdgeMask[2] = {0xFF, 0xFF};  // window mask at x=0 and x=255 from the last normal line
 +private:
@@ -444,7 +447,7 @@ index f6034f2..d283960 100644
      // threading
  
 diff --git a/src/GPU_Soft.cpp b/src/GPU_Soft.cpp
-index 861c1a6..f039356 100644
+index 861c1a6..fe882fd 100644
 --- a/src/GPU_Soft.cpp
 +++ b/src/GPU_Soft.cpp
 @@ -1,3 +1,5 @@
@@ -461,7 +464,7 @@ index 861c1a6..f039356 100644
  
  namespace melonDS
  {
-@@ -109,6 +112,7 @@ void SoftRenderer::DrawScanline(u32 line)
+@@ -109,14 +112,40 @@ void SoftRenderer::DrawScanline(u32 line)
  
      // the position used for drawing operations is based on VCOUNT
      line = GPU.VCount;
@@ -469,7 +472,40 @@ index 861c1a6..f039356 100644
      if (line < 192)
      {
          // retrieve 3D output
-@@ -125,6 +129,9 @@ void SoftRenderer::DrawScanline(u32 line)
+         Output3D = Rend3D->GetLine(line);
+ 
++        if (line == 0) PortCur = PortMove;   // latch the portrait move for the whole frame
++        const PortraitMove& pm = PortCur;
++        bool pmsrc = pm.on && WideMargin > 0 && (int)line >= pm.sy && (int)line < pm.sy + pm.sh && pm.sw <= 96 && pm.sh <= 96;
++        SoftRenderer2D* pr = pm.eng ? (SoftRenderer2D*)Rend2D_B.get() : (SoftRenderer2D*)Rend2D_A.get();
++        if (pmsrc)
++        {
++            // capture the portrait as the game drew it, then draw the line again without it
++            pr->DrawScanline(line);
++            alignas(8) u32 tmp[256];
++            if (pm.eng) DrawScanlineB(line, tmp); else DrawScanlineA(line, tmp);
++            ExpandColor(tmp);
++            for (int i = 0; i < pm.sw; i++)
++            {
++                int x = pm.sx + i;
++                PortCap[(line - pm.sy) * pm.sw + i] = (x >= 0 && x < 256) ? tmp[x] : 0;
++            }
++            PortCapValid = true;
++            melonDS::GPU2D& u = pm.eng ? GPU.GPU2D_B : GPU.GPU2D_A;
++            u8 bits = 0;
++            if (u.DispCnt & 0x8) bits |= 1;                                  // BG0 is 3D: window frame + backdrop
++            for (int k = (u.DispCnt & 0x8) ? 1 : 0; k < 4; k++) if (!(u.BGCnt[k] & 0x4000)) bits |= 1 << k;   // 256-wide window layers
++            pr->MaskX0 = pm.sx; pr->MaskX1 = pm.sx + pm.sw; pr->MaskBits = bits;
++        }
++
+         // draw BG/OBJ layers
+         Rend2D_A->DrawScanline(line);
+         Rend2D_B->DrawScanline(line);
++        pr->MaskBits = 0;
+ 
+         // draw the final screen output
+         DrawScanlineA(line, dstA);
+@@ -125,6 +154,9 @@ void SoftRenderer::DrawScanline(u32 line)
          // perform display capture if enabled
          if (GPU.CaptureEnable)
              DoCapture(line);
@@ -479,7 +515,34 @@ index 861c1a6..f039356 100644
      }
      else
      {
-@@ -444,6 +451,80 @@ void SoftRenderer::ExpandColor(u32* dst)
+@@ -145,6 +177,26 @@ void SoftRenderer::DrawScanline(u32 line)
+         // expand the color from 6-bit to 8-bit
+         ExpandColor(dstA);
+         ExpandColor(dstB);
++        // paint the moved portrait into its new place (main line and left margin)
++        const PortraitMove& pm = PortCur;
++        int vl = (int)GPU.VCount;
++        if (pm.on && PortCapValid && WideMargin > 0 && vl < 192 && vl >= pm.dy && vl < pm.dy + pm.sh && pm.sw <= 96 && pm.sh <= 96)
++        {
++            const int W = WideMargin;
++            int scr = (pm.eng == 0) ? (GPU.ScreenSwap ? 0 : 1) : (GPU.ScreenSwap ? 1 : 0);
++            u32* dst = pm.eng ? dstB : dstA;
++            u32* left = &WideSide[BackBuffer][scr][0][vl * W];
++            u32* right = &WideSide[BackBuffer][scr][1][vl * W];
++            const u32* src = &PortCap[(vl - pm.dy) * pm.sw];
++            for (int i = 0; i < pm.sw; i++)
++            {
++                int x = pm.dx + i;
++                if (x < -W || x >= 256 + W) continue;
++                if (x < 0) left[x + W] = src[i];
++                else if (x < 256) dst[x] = src[i];
++                else right[x - 256] = src[i];
++            }
++        }
+     }
+     else
+     {
+@@ -444,6 +496,80 @@ void SoftRenderer::ExpandColor(u32* dst)
  }
  
  
@@ -561,15 +624,17 @@ index 861c1a6..f039356 100644
  {
      int frontbuf = BackBuffer ^ 1;
 diff --git a/src/GPU_Soft.h b/src/GPU_Soft.h
-index d6396af..0076498 100644
+index d6396af..9360d7e 100644
 --- a/src/GPU_Soft.h
 +++ b/src/GPU_Soft.h
-@@ -51,6 +51,12 @@ public:
+@@ -51,6 +51,14 @@ public:
  
      bool GetFramebuffers(void** top, void** bottom) override;
  
 +    // recomp widescreen: extra columns either side of each screen (0 = off, max 128)
 +    int WideMargin = 0;
++    // recomp: show a dialogue portrait somewhere else (left of the text box, into the margin). Set per frame.
++    struct PortraitMove { int on = 0, eng = 0, sx = 0, sy = 0, sw = 0, sh = 0, dx = 0, dy = 0; } PortMove, PortCur;
 +    bool WideExtend3D = true;     // stretch translucent 3D edge pixels into the margins (dungeon darkness)
 +    // left/right margin pixels of the front buffer for screen 0 (top) / 1 (bottom), W*192 each
 +    void GetWideMargins(int screen, u32** left, u32** right);
@@ -577,7 +642,7 @@ index d6396af..0076498 100644
  private:
      friend class SoftRenderer2D;
      friend class SoftRenderer3D;
-@@ -67,6 +73,10 @@ private:
+@@ -67,6 +75,12 @@ private:
  
      void ApplyMasterBrightness(u16 regval, u32* dst);
      void ExpandColor(u32* dst);
@@ -585,6 +650,8 @@ index d6396af..0076498 100644
 +    u32 WideSide[2][2][2][128 * 192] = {};   // [buffer][screen][side][x + line*W]
 +    alignas(8) u32 ZeroLine3D[256] = {};
 +    alignas(8) u32 WideLine3D[256] = {};
++    u32 PortCap[96 * 96] = {};   // captured portrait (expanded colour)
++    bool PortCapValid = false;
  };
  
  }

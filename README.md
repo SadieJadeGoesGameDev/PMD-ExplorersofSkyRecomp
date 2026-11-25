@@ -12,9 +12,9 @@ ARM7, graphics, sound, timing. Anything not lifted falls back to melonDS's inter
 ROM by the tools here. Never commit the ROM, saves or anything in `gen/`.
 
 ## Features
-- 16:9 widescreen. Dungeons and towns draw real extra content, including the 3D layer (dungeon darkness, clouds),
-  instead of stretching.
-- Recomp Options in the in-game menu: widescreen, filters, Enhancements, autosave, save slots, exit to Windows.
+- 16:9 widescreen, always on. Dungeons and towns draw real extra content, including the 3D layer (dungeon darkness,
+  clouds, fades), instead of stretching. Speaker portraits move beside the text box.
+- Recomp Options in the in-game menu: filters, display mode, Enhancements, autosave, save slots, exit to Windows.
 - Filters: xBRZ, Scanlines, Smooth, Glow, DS Screen.
 - Enhancements (toggleable, based on SkyTemple patches): Pick Any Starter, Full Team Control, Gentler Hunger,
   Keep Items on Defeat, IQ Grows with Level, Team EXP Share.
@@ -54,7 +54,7 @@ bash build-win/build_win.sh    # SkyRecomp.exe
 ```
 
 ## Dev keys
-F4 widescreen, F11 borderless, F1 layout. Dev builds (`DEV=1 bash build-win/build_win.sh`) add F5/F9 quicksave/quickload.
+F11 borderless, F1 layout. Dev builds (`DEV=1 bash build-win/build_win.sh`) add F5/F9 quicksave/quickload.
 
 ## License
 GPL-3.0, like melonDS and the SkyTemple patches it builds on. Pokémon Mystery Dungeon is © Nintendo / Creatures /

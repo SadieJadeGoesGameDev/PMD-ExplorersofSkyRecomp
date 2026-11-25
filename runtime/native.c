@@ -331,10 +331,10 @@ static void rm_enter(int st) {
     fprintf(stderr, "[rm] enter %d\n", st);
     if (st == RM_MAIN) rm_open_parent();
     else if (st == RM_GFX) {
-        static const uint16_t lab[4] = {S_WIDE, S_FILTER, S_DISPLAY, S_RES};
-        const uint16_t *ch[4] = {CH_ONOFF, CH_FILTER, CH_DISPLAY, CH_RES};
-        int stt[4] = {S->widescreen, S->filter, S->display, S->resolution};
-        rm_open_options(S_GRAPHICS, lab, ch, stt, 4);
+        static const uint16_t lab[3] = {S_FILTER, S_DISPLAY, S_RES};          // widescreen is always on
+        const uint16_t *ch[3] = {CH_FILTER, CH_DISPLAY, CH_RES};
+        int stt[3] = {S->filter, S->display, S->resolution};
+        rm_open_options(S_GRAPHICS, lab, ch, stt, 3);
     } else if (st == RM_SADIE) {
         static const uint16_t lab[6] = {S_SAD0, S_SAD1, S_SAD2, S_SAD3, S_SAD4, S_SAD5};
         const uint16_t *ch[6] = {CH_ONOFF, CH_ONOFF, CH_ONOFF, CH_ONOFF, CH_ONOFF, CH_ONOFF};
@@ -370,13 +370,10 @@ static int rm_update(void) {
         default: rm_state = RM_IDLE; return 1;
         }
     case RM_GFX:
-        fprintf(stderr, "[rm] graphics states in %d %d %d %d -> out %d %d %d %d\n", (int)rd32(SCR_STATES), (int)rd32(SCR_STATES + 4), (int)rd32(SCR_STATES + 8), (int)rd32(SCR_STATES + 12),
-                (int)rd32(SCR_STATES2), (int)rd32(SCR_STATES2 + 4), (int)rd32(SCR_STATES2 + 8), (int)rd32(SCR_STATES2 + 12));
         if (rm_confirmed) {
-            S->widescreen = (int)rd32(SCR_STATES2 + 0) != 0;
-            S->filter = (int)rd32(SCR_STATES2 + 4) % FILTER_COUNT;
-            S->display = (int)rd32(SCR_STATES2 + 8) % DISPLAY_COUNT;
-            S->resolution = (int)rd32(SCR_STATES2 + 12) % 5;
+            S->filter = (int)rd32(SCR_STATES2 + 0) % FILTER_COUNT;
+            S->display = (int)rd32(SCR_STATES2 + 4) % DISPLAY_COUNT;
+            S->resolution = (int)rd32(SCR_STATES2 + 8) % 5;
             S->dirty = 1;
         }
         rm_enter(RM_MAIN); return 0;
@@ -493,3 +490,35 @@ void f_arm9_20040AC(void) {
 }
 int recomp_menu_busy(void) { return rm_state != RM_IDLE; }
 void recomp_menu_reset(void) { rm_state = RM_IDLE; rm_win = -2; }
+
+/* ---------------------------------------------------------------- portraits beside the text box (widescreen)
+   Reads the game's window list. When a portrait box and a dialogue box are both showing on the same screen,
+   returns where the portrait is drawn and where it should go instead: left of the text box, at the same height,
+   reaching into the left margin. out: {on, screen, sx, sy, sw, sh, dx, dy} in pixels. */
+#define WINDOW_LIST 0x022A88DCu
+#define UPD_PORTRAIT 0x0202F70Cu
+#define UPD_DIALOGUE 0x0202F488u
+void recomp_portrait_move(int *out) {
+    out[0] = 0;
+    if (!recomp_cpu_ready() || !recomp_wide_margin) return;
+    int pw = -1, dw = -1;
+    for (int i = 0; i < 20; i++) {
+        uint32_t w = WINDOW_LIST + i * 224, upd = rd32(w);
+        if (!upd || (int8_t)rd8(w + 0xB6) == 0) continue;
+        if (upd == UPD_PORTRAIT && pw < 0) {
+            uint32_t box = rd32(w + 0xC), st = box ? rd32(box + 4) : 0;
+            if (rd8(box + 0x2A) && st >= 1 && st <= 3) pw = i;   /* framed portrait that is showing */
+        } else if (upd == UPD_DIALOGUE && dw < 0) dw = i;
+    }
+    if (pw < 0 || dw < 0) return;
+    uint32_t p = WINDOW_LIST + pw * 224, d = WINDOW_LIST + dw * 224;
+    int scr = rd8(p + 8);
+    if (scr != rd8(d + 8)) return;
+    const int P = 6;                                   /* the frame sits ~5 px outside the window */
+    int sx = rd8(p + 4) * 8 - P, sy = rd8(p + 5) * 8 - P, sw = rd8(p + 6) * 8 + 2 * P, sh = rd8(p + 7) * 8 + 2 * P;
+    int tx = rd8(d + 4) * 8 - P, ty = rd8(d + 5) * 8 - P;
+    int dx = tx - 2 - sw, dy = ty;
+    if (dx < -recomp_wide_margin - 2) dx = -recomp_wide_margin - 2;
+    if (sx == dx && sy == dy) return;
+    out[0] = 1; out[1] = scr; out[2] = sx; out[3] = sy; out[4] = sw; out[5] = sh; out[6] = dx; out[7] = dy;
+}

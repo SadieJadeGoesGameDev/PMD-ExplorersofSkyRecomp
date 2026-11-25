@@ -172,3 +172,12 @@
 
 ## v0.6.6
 - Fades drawn as a solid (alpha 31) full-screen 3D quad exactly 4:3 wide were skipped by the uniform-3D fallback, which only took translucent lines. It now takes any uniform 3D line with alpha > 0, filling only where the wide render is empty. Intro black and white flashes are full width now.
+
+## v0.7.0
+- Widescreen only: the toggle is gone from Graphics (3 rows now), F4 and the ini key are gone, and the default is 1.
+- Portraits beside the text box: recomp_portrait_move() (native.c) reads WINDOW_LIST 0x22A88DC and finds a framed portrait box
+  (update fn 0x202F70C, state 1-3) plus a dialogue box (0x202F488) on the same screen. GPU_Soft PortMove/PortCur is
+  latched at line 0. On the source rows it renders once unmasked to capture (rect = window +-6 px), then renders
+  with the window layers masked (BG0 3D frame/backdrop plus 256-wide text BGs) via SoftRenderer2D MaskX0/X1/MaskBits.
+  On the destination rows it paints the capture left of the text box (dx = textbox_x - 6 - 2 - sw, clamped to -W-2),
+  into the main line and the left margin after ExpandColor.
