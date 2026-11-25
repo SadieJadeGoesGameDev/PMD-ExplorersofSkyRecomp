@@ -153,7 +153,7 @@ static void watchdog_thread() {
 
 
 // ---------------------------------------------------------------- settings (SkyRecomp.ini next to the exe)
-static const char *SADIE_KEYS[SADIE_COUNT] = {"any_starter", "team_control", "gentle_hunger", "keep_items", "iq_per_level", "team_exp"};
+static const char *SADIE_KEYS[SADIE_COUNT] = {"any_starter", "team_control", "gentle_hunger", "keep_items", "iq_per_level", "team_exp", "recruit_anyone"};
 struct Res { int w, h; };
 static const Res RESOLUTIONS[] = {{1280, 720}, {1600, 900}, {1920, 1080}, {2560, 1440}, {3840, 2160}};
 static const int NUM_RES = sizeof(RESOLUTIONS) / sizeof(RESOLUTIONS[0]);
@@ -389,7 +389,7 @@ int main(int argc, char **argv) {
     Platform::g_save_path = save_path;
     rec_start(dir, save);
     std::string save_name = save_path.substr(save_path.find_last_of("/\\") + 1);
-    std::string title = std::string("Explorers of Sky - Sky Recomp v0.7.3 - slot ") + std::to_string(S.save_slot) + " - " +
+    std::string title = std::string("Explorers of Sky - Sky Recomp v0.7.4 - slot ") + std::to_string(S.save_slot) + " - " +
                         (save.empty() ? "new save: " : "save loaded: ") + save_name;
 
     // ---- set up the DS

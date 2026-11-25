@@ -272,7 +272,7 @@ index 548efe1..f8da116 100644
      alignas(8) u32 OBJLine[256];
      alignas(8) u8 OBJWindow[256];
 diff --git a/src/GPU3D.cpp b/src/GPU3D.cpp
-index 3272a34..ca8ced3 100644
+index 3272a34..d419cdd 100644
 --- a/src/GPU3D.cpp
 +++ b/src/GPU3D.cpp
 @@ -1,3 +1,4 @@
@@ -360,7 +360,7 @@ index 3272a34..ca8ced3 100644
      // Z clipping
      nverts = ClipAgainstPlane<2, attribs>(gpu, vertices, nverts, clipstart);
  
-@@ -1122,6 +1129,12 @@ void GPU3D::SubmitPolygon() noexcept
+@@ -1122,6 +1129,19 @@ void GPU3D::SubmitPolygon() noexcept
  
          vtx->FinalPosition[0] = posX & 0x1FF;
          vtx->FinalPosition[1] = posY & 0xFF;
@@ -369,6 +369,13 @@ index 3272a34..ca8ced3 100644
 +            // wide view: signed X from -margin to 255+margin (the rasterizer clamps each pass to its window)
 +            s32 ww = vtx->Position[3];
 +            vtx->FinalPosition[0] = ww ? (s32)((((s64)vtx->Position[0] + ww) * (s64)Viewport[4]) / ((s64)ww << 1) + (s64)Viewport[0]) : 0;
++            // the game clips its own 2D-style 3D shapes (dungeon darkness, fades) to the screen: a vertex pinned
++            // exactly to the left/right edge of a flat-colour shape is stretched across the margin, so what's at the edge carries on
++            s32 vx0 = (s32)Viewport[0], vx1 = (s32)Viewport[0] + (s32)Viewport[4];
++            if (vx0 == 0 && vx1 >= 255 && ((TexParam >> 26) & 0x7) == 0) {   // untextured only: darkness, fades (not HUD art)
++                if (vtx->FinalPosition[0] == vx0) vtx->FinalPosition[0] -= WideMargin3D;
++                else if (vtx->FinalPosition[0] == vx1) vtx->FinalPosition[0] += WideMargin3D;
++            }
 +        }
  
          // hi-res positions
@@ -386,15 +393,16 @@ index 73eff2f..370183f 100644
      s32 ProjMatrixStack[16] {};
      s32 PosMatrixStack[32][16] {};
 diff --git a/src/GPU3D_Soft.cpp b/src/GPU3D_Soft.cpp
-index e620270..b788613 100644
+index e620270..c575719 100644
 --- a/src/GPU3D_Soft.cpp
 +++ b/src/GPU3D_Soft.cpp
-@@ -1,3 +1,4 @@
+@@ -1,3 +1,5 @@
++#include <cstdio>
 +#include <cstdlib>
  /*
      Copyright 2016-2026 melonDS team
  
-@@ -623,7 +624,7 @@ void SoftRenderer3D::SetupPolygonLeftEdge(SoftRenderer3D::RendererPolygon* rp, s
+@@ -623,7 +625,7 @@ void SoftRenderer3D::SetupPolygonLeftEdge(SoftRenderer3D::RendererPolygon* rp, s
          }
      }
  
@@ -403,7 +411,7 @@ index e620270..b788613 100644
                                polygon->Vertices[rp->CurVL]->FinalPosition[1], polygon->Vertices[rp->NextVL]->FinalPosition[1],
                                polygon->FinalW[rp->CurVL], polygon->FinalW[rp->NextVL], y, polygon->WBuffer);
  }
-@@ -650,7 +651,7 @@ void SoftRenderer3D::SetupPolygonRightEdge(SoftRenderer3D::RendererPolygon* rp,
+@@ -650,7 +652,7 @@ void SoftRenderer3D::SetupPolygonRightEdge(SoftRenderer3D::RendererPolygon* rp,
          }
      }
  
@@ -412,7 +420,7 @@ index e620270..b788613 100644
                                polygon->Vertices[rp->CurVR]->FinalPosition[1], polygon->Vertices[rp->NextVR]->FinalPosition[1],
                                polygon->FinalW[rp->CurVR], polygon->FinalW[rp->NextVR], y, polygon->WBuffer);
  }
-@@ -688,18 +689,18 @@ void SoftRenderer3D::SetupPolygon(SoftRenderer3D::RendererPolygon* rp, Polygon*
+@@ -688,18 +690,18 @@ void SoftRenderer3D::SetupPolygon(SoftRenderer3D::RendererPolygon* rp, Polygon*
          int i;
  
          i = 1;
@@ -437,7 +445,7 @@ index e620270..b788613 100644
      }
      else
      {
-@@ -793,10 +794,10 @@ void SoftRenderer3D::RenderShadowMaskScanline(RendererPolygon* rp, s32 y)
+@@ -793,10 +795,10 @@ void SoftRenderer3D::RenderShadowMaskScanline(RendererPolygon* rp, s32 y)
          else
          {
              l_filledge = (rp->SlopeR.Negative || !rp->SlopeR.XMajor)
@@ -450,7 +458,7 @@ index e620270..b788613 100644
          }
      }
      else
-@@ -821,10 +822,10 @@ void SoftRenderer3D::RenderShadowMaskScanline(RendererPolygon* rp, s32 y)
+@@ -821,10 +823,10 @@ void SoftRenderer3D::RenderShadowMaskScanline(RendererPolygon* rp, s32 y)
          else
          {
              l_filledge = ((rp->SlopeL.Negative || !rp->SlopeL.XMajor)
@@ -463,7 +471,7 @@ index e620270..b788613 100644
          }
      }
  
-@@ -846,7 +847,7 @@ void SoftRenderer3D::RenderShadowMaskScanline(RendererPolygon* rp, s32 y)
+@@ -846,7 +848,7 @@ void SoftRenderer3D::RenderShadowMaskScanline(RendererPolygon* rp, s32 y)
      s32 x = xstart;
      Interpolator<0> interpX(xstart, xend+1, wl, wr, polygon->WBuffer);
  
@@ -472,7 +480,7 @@ index e620270..b788613 100644
      s32 xlimit;
  
      // for shadow masks: set stencil bits where the depth test fails.
-@@ -856,7 +857,7 @@ void SoftRenderer3D::RenderShadowMaskScanline(RendererPolygon* rp, s32 y)
+@@ -856,7 +858,7 @@ void SoftRenderer3D::RenderShadowMaskScanline(RendererPolygon* rp, s32 y)
      edge = yedge | 0x1;
      xlimit = xstart+l_edgelen;
      if (xlimit > xend+1) xlimit = xend+1;
@@ -481,7 +489,7 @@ index e620270..b788613 100644
  
      if (!l_filledge) x = xlimit;
      else
-@@ -884,7 +885,7 @@ void SoftRenderer3D::RenderShadowMaskScanline(RendererPolygon* rp, s32 y)
+@@ -884,7 +886,7 @@ void SoftRenderer3D::RenderShadowMaskScanline(RendererPolygon* rp, s32 y)
      edge = yedge;
      xlimit = xend-r_edgelen+1;
      if (xlimit > xend+1) xlimit = xend+1;
@@ -490,7 +498,7 @@ index e620270..b788613 100644
      if (wireframe && !edge) x = std::max(x, xlimit);
      else for (; x < xlimit; x++)
      {
-@@ -909,7 +910,7 @@ void SoftRenderer3D::RenderShadowMaskScanline(RendererPolygon* rp, s32 y)
+@@ -909,7 +911,7 @@ void SoftRenderer3D::RenderShadowMaskScanline(RendererPolygon* rp, s32 y)
      // part 3: right edge
      edge = yedge | 0x2;
      xlimit = xend+1;
@@ -499,7 +507,7 @@ index e620270..b788613 100644
  
      if (r_filledge)
      for (; x < xlimit; x++)
-@@ -1028,10 +1029,10 @@ void SoftRenderer3D::RenderPolygonScanline(RendererPolygon* rp, s32 y)
+@@ -1028,10 +1030,10 @@ void SoftRenderer3D::RenderPolygonScanline(RendererPolygon* rp, s32 y)
          else
          {
              l_filledge = (rp->SlopeR.Negative || !rp->SlopeR.XMajor)
@@ -512,7 +520,7 @@ index e620270..b788613 100644
          }
      }
      else
-@@ -1063,10 +1064,10 @@ void SoftRenderer3D::RenderPolygonScanline(RendererPolygon* rp, s32 y)
+@@ -1063,10 +1065,10 @@ void SoftRenderer3D::RenderPolygonScanline(RendererPolygon* rp, s32 y)
          else
          {
              l_filledge = ((rp->SlopeL.Negative || !rp->SlopeL.XMajor)
@@ -525,7 +533,7 @@ index e620270..b788613 100644
          }
      }
  
-@@ -1096,7 +1097,7 @@ void SoftRenderer3D::RenderPolygonScanline(RendererPolygon* rp, s32 y)
+@@ -1096,7 +1098,7 @@ void SoftRenderer3D::RenderPolygonScanline(RendererPolygon* rp, s32 y)
      s32 x = xstart;
      Interpolator<0> interpX(xstart, xend+1, wl, wr, polygon->WBuffer);
  
@@ -534,7 +542,7 @@ index e620270..b788613 100644
      s32 xlimit;
  
      s32 xcov = 0;
-@@ -1105,7 +1106,7 @@ void SoftRenderer3D::RenderPolygonScanline(RendererPolygon* rp, s32 y)
+@@ -1105,7 +1107,7 @@ void SoftRenderer3D::RenderPolygonScanline(RendererPolygon* rp, s32 y)
      edge = yedge | 0x1;
      xlimit = xstart+l_edgelen;
      if (xlimit > xend+1) xlimit = xend+1;
@@ -543,7 +551,7 @@ index e620270..b788613 100644
      if (l_edgecov & (1<<31))
      {
          xcov = (l_edgecov >> 12) & 0x3FF;
-@@ -1206,7 +1207,7 @@ void SoftRenderer3D::RenderPolygonScanline(RendererPolygon* rp, s32 y)
+@@ -1206,7 +1208,7 @@ void SoftRenderer3D::RenderPolygonScanline(RendererPolygon* rp, s32 y)
      edge = yedge;
      xlimit = xend-r_edgelen+1;
      if (xlimit > xend+1) xlimit = xend+1;
@@ -552,7 +560,7 @@ index e620270..b788613 100644
  
      if (wireframe && !edge) x = std::max(x, xlimit);
      else
-@@ -1294,7 +1295,7 @@ void SoftRenderer3D::RenderPolygonScanline(RendererPolygon* rp, s32 y)
+@@ -1294,7 +1296,7 @@ void SoftRenderer3D::RenderPolygonScanline(RendererPolygon* rp, s32 y)
      // part 3: right edge
      edge = yedge | 0x2;
      xlimit = xend+1;
@@ -561,7 +569,7 @@ index e620270..b788613 100644
      if (r_edgecov & (1<<31))
      {
          xcov = (r_edgecov >> 12) & 0x3FF;
-@@ -1711,6 +1712,35 @@ void SoftRenderer3D::ClearBuffers()
+@@ -1711,6 +1713,35 @@ void SoftRenderer3D::ClearBuffers()
  
  void SoftRenderer3D::RenderPolygons(bool threaded, Polygon** polygons, int npolys)
  {

@@ -17,7 +17,7 @@ ROM by the tools here. Never commit the ROM, saves or anything in `gen/`.
 - Recomp Options in the in-game menu: filters, display mode, Enhancements, autosave, save slots, exit to Windows.
 - Filters: xBRZ, Scanlines, Smooth, Glow, DS Screen.
 - Enhancements (toggleable, based on SkyTemple patches): Pick Any Starter, Full Team Control, Gentler Hunger,
-  Keep Items on Defeat, IQ Grows with Level, Team EXP Share.
+  Keep Items on Defeat, IQ Grows with Level, Team EXP Share, Recruit from Anyone.
 - Three save slots; windowed, borderless and fullscreen modes.
 - A flight recorder (`replay_last.rpl`) and crash log (`recomp_log.txt`) next to the ROM, for debugging.
 

@@ -168,7 +168,7 @@ int main(int argc, char** argv) {
     if (getenv("WIDESCR")) sr->WideScreens = atoi(getenv("WIDESCR"));
     int W = getenv("WIDE") ? atoi(getenv("WIDE")) : 0;
     recomp_wide_margin = W;
-    if (const char* sd = getenv("SADIE")) for (int g = 0; g < 6 && sd[g]; g++) recomp_settings.sadie[g] = sd[g] == '1';
+    if (const char* sd = getenv("SADIE")) for (int g = 0; g < SADIE_COUNT && sd[g]; g++) recomp_settings.sadie[g] = sd[g] == '1';
     sr->WideMargin = W;
     std::optional<NDSCart::NDSCartArgs> cargs;
     // REPLAY=file.rpl: a Sky Recomp flight recording (starting save + per-frame inputs/settings)

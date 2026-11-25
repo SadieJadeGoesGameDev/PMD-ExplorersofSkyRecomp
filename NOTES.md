@@ -195,3 +195,13 @@
 
 ## v0.7.3
 - Filter Off now uses sharp bilinear on the GPU: nearest-neighbour upscale into a render target at a whole-number factor K = ceil(out_h/vh) (capped at 4096), then a linear scale to the window. Every DS pixel is the same width (1080/192 = 5.625x had made 1-px minimap lines 5 or 6 px). Not testable in the Linux rig (SDL path).
+
+## v0.7.4
+- Darkness in the margins: the game sends its 2D-style 3D shapes already clipped to x = 0..256 (DBGPOLY showed no
+  polygon ever reaches past the 4:3 edge). With WideMargin3D, a vertex of an untextured polygon that sits exactly
+  on the viewport edge (0 or 256) is pushed out by +-M, so darkness and fades carry on across the margin. Textured
+  shapes (HUD art) are left alone, because doing it for everything smeared the floor HUD bar.
+- Enhancement 6 "Recruit from Anyone" (recruit_anyone):
+  ApplyDamage 0x230A818/81C: is_team_leader(+7)==0 -> is_not_team_member(+6)==1 decides whether to skip RecruitCheck.
+  RecruitCheck 0x230DD40 nop / 0x230DD58 b: no adjacency requirement. CanSeeTarget (0x230DD7C) is kept.
+  Patched functions 2308FE0 and 230DBD0 fall back to the interpreter while the group is on.

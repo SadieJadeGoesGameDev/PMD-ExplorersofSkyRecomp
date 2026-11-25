@@ -159,7 +159,7 @@ void f_overlay11_22F1F3C(void) {
 }
 
 #include "settings.h"
-RecompSettings recomp_settings = {1, FILTER_OFF, DISPLAY_WINDOWED, 0, 1, {1, 1, 1, 1, 1, 1}, 0, 0, 0, 1};
+RecompSettings recomp_settings = {1, FILTER_OFF, DISPLAY_WINDOWED, 0, 1, {1, 1, 1, 1, 1, 1, 1}, 0, 0, 0, 1};
 
 /* =====================================================================================================
    Recomp Options: a submenu added to the game's own main menu, built from the game's own windows.
@@ -180,14 +180,14 @@ enum {
     S_RECOMP = 0x7F00, S_GRAPHICS, S_SADIE, S_SLOT, S_EXIT, S_WIDE, S_FILTER, S_DISPLAY, S_RES,
     S_OFF, S_ON, S_XBRZ, S_CRT, S_SMOOTH, S_GLOW, S_LCD, S_WINDOWED, S_BORDERLESS, S_FULLSCREEN,
     S_R0, S_R1, S_R2, S_R3, S_R4,
-    S_SAD0, S_SAD1, S_SAD2, S_SAD3, S_SAD4, S_SAD5,
+    S_SAD0, S_SAD1, S_SAD2, S_SAD3, S_SAD4, S_SAD5, S_SAD6,
     S_SLOT1, S_SLOT2, S_SLOT3, S_YES, S_NO, S_EXITQ, S_SLOTQ, S_AUTOSAVE, S_END
 };
 static const char *rm_strings[S_END - S_RECOMP] = {
     "Recomp Options", "Graphics", "Enhancements", "Save Slot", "Exit to Windows", "Widescreen", "Filter", "Display", "Resolution",
     "Off", "On", "xBRZ", "Scanlines", "Smooth", "Glow", "DS Screen", "Windowed", "Borderless", "Fullscreen",
     "1280x720", "1600x900", "1920x1080", "2560x1440", "3840x2160",
-    "Pick Any Starter", "Full Team Control", "Gentler Hunger", "Keep Items on Defeat", "IQ Grows with Level", "Team EXP Share",
+    "Pick Any Starter", "Full Team Control", "Gentler Hunger", "Keep Items on Defeat", "IQ Grows with Level", "Team EXP Share", "Recruit from Anyone",
     "Slot 1", "Slot 2", "Slot 3", "Yes", "No", "Exit to Windows?", "Switch slot? (restarts)", "Autosave"
 };
 
@@ -336,9 +336,9 @@ static void rm_enter(int st) {
         int stt[3] = {S->filter, S->display, S->resolution};
         rm_open_options(S_GRAPHICS, lab, ch, stt, 3);
     } else if (st == RM_SADIE) {
-        static const uint16_t lab[6] = {S_SAD0, S_SAD1, S_SAD2, S_SAD3, S_SAD4, S_SAD5};
-        const uint16_t *ch[6] = {CH_ONOFF, CH_ONOFF, CH_ONOFF, CH_ONOFF, CH_ONOFF, CH_ONOFF};
-        rm_open_options(S_SADIE, lab, ch, S->sadie, 6);
+        static const uint16_t lab[7] = {S_SAD0, S_SAD1, S_SAD2, S_SAD3, S_SAD4, S_SAD5, S_SAD6};
+        const uint16_t *ch[7] = {CH_ONOFF, CH_ONOFF, CH_ONOFF, CH_ONOFF, CH_ONOFF, CH_ONOFF, CH_ONOFF};
+        rm_open_options(S_SADIE, lab, ch, S->sadie, 7);
     } else if (st == RM_AUTO) {
         static const uint16_t lab[1] = {S_AUTOSAVE};
         const uint16_t *ch[1] = {CH_ONOFF};

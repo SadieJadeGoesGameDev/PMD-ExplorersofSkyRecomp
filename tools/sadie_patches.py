@@ -150,6 +150,20 @@ groups[5] = dict(name='team_exp', out=assemble(
     opened('overlay_0029', ['anonymous_asm_mods/exp_share/selector_overlay29.asm']),
     params={'PercentageShared': 100}))
 
+# 6: anyone can recruit: a defeated enemy may ask to join when any team member lands the final blow, from any distance
+#    (vanilla: only the leader, and only from an adjacent tile). The line-of-sight check stays.
+groups[6] = dict(name='recruit_anyone', out=assemble(OWN_HEAD + """
+.open "overlay_0029.bin", 0x022DC240
+.org 0x0230A818
+    .word 0x05D00006            ; ldrbeq r0, [r0, #6]  ApplyDamage: was is_team_leader (#7) -> is_not_team_member
+    .word 0x03500001            ; cmpeq r0, #1         skip the recruit check only when an enemy landed the blow
+.org 0x0230DD40
+    .word 0xE1A00000            ; nop  RecruitCheck: was bgt (|dx| > 1 -> no)
+.org 0x0230DD58
+    .word 0xEA000001            ; b 0x0230DD64  was ble (|dy| > 1 -> no)
+.close
+""", copy_tree=False))
+
 # ---- diff -> byte runs
 inv = json.load(open(R + '/inventory.json'))
 def func_of(binname, addr):
