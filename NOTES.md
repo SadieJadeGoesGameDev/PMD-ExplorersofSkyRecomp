@@ -156,3 +156,13 @@
   the real 3D line is a uniform translucent tint, the edge pixel fills (fades drawn as exact 4:3 quads).
 - Backups: GPU3D*.prewide, GPU_Soft.cpp.prewide in /tmp/melonDS/src.
 - Seen: at the dungeon's left map edge a black band plus stale tiles; this predates wide 3D (BG ring outside the map).
+
+## v0.6.4: host stack leak (crash after Drowzee, Mt. Bristle crash)
+- Both crashes were C00000FD stack overflows on a game fiber. The new gauge showed about 1.1 MB per 30s of growth in
+  dungeons. Reproduced in the rig with her replay.
+- Cause: the guest abandons frames and jumps to an outer level's return address with that level's SP (dungeon
+  loop, 0x02003510 / 0x022E9FF8 pattern). The host run_interp/native frames in between never returned.
+- Fix: each nested run_interp records {stop, sp, jmpbuf} per fiber (Fiber::frames). When the guest is in thread
+  mode with SP above the innermost frame and lands on an outer frame's stop/sp, __builtin_longjmp unwinds the host
+  there (stat_unwinds). Replay frames are pixel-identical; stack stays at about 3 KB.
+- F5/F6/F9 are dev-only (#ifdef SKYRECOMP_DEV, DEV=1 build_win.sh).

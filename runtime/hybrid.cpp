@@ -47,7 +47,7 @@ static NDS *nds;
 static const uint32_t MAGIC = 0x01FFFF00;   // fake return address for IRQ/SWI entry (unused ITCM)
 static const uint32_t SAVECTX_RESUME = 0x02079D4C;
 static bool trace = getenv("RECOMP_TRACE") != nullptr;
-static uint64_t stat_native_calls, stat_interp_steps, stat_fallbacks, stat_fibers, stat_switches, stat_diverts;
+static uint64_t stat_native_calls, stat_interp_steps, stat_fallbacks, stat_fibers, stat_switches, stat_diverts, stat_unwinds;
 static size_t stat_stack_max;   // deepest host stack use seen on a game fiber since the last report
 struct Fiber;
 static inline void stack_probe();
@@ -72,6 +72,8 @@ struct Fiber {
     char *stack = nullptr;
 #endif
     std::vector<Key> keys;                          // resume points this thread is waiting on
+    struct IFrame { uint32_t stop, sp; void **jb; };
+    std::vector<IFrame> frames;                     // nested interpreter runs on this fiber's host stack
 };
 static Fiber emu_f, *cur;
 static inline void stack_probe() {
@@ -286,11 +288,38 @@ static bool on_exc_return() {
 
 // Interpret (calling native functions where possible) until PC == stop with SP == stop_sp.
 // Returns true if diverted: this fiber was parked and resumed somewhere other than `stop`.
+static bool run_interp_impl(uint32_t stop, uint32_t stop_sp, bool has_stop);
+// Every nested run records where it returns to. Game code sometimes abandons frames and jumps straight
+// back to an outer level with that level's stack pointer (a longjmp, or the dungeon loop restarting).
+// The host frames in between would never return and the host stack would grow every time, so when the
+// guest arrives at an outer frame's return point we unwind the host stack to that frame.
 static bool run_interp(uint32_t stop, uint32_t stop_sp, bool has_stop) {
+    if (!has_stop) return run_interp_impl(stop, stop_sp, has_stop);
+    Fiber *me = cur;
+    size_t lvl = me->frames.size();
+    void *jb[5];
+    me->frames.push_back({stop, stop_sp, jb});
+    if (__builtin_setjmp(jb)) {         // the guest came back to our return point from a deeper level
+        me->frames.resize(lvl);
+        stat_unwinds++;
+        return false;
+    }
+    bool r = run_interp_impl(stop, stop_sp, has_stop);
+    me->frames.resize(lvl);
+    return r;
+}
+// The guest is at pc/sp in thread mode above the innermost frame's stack: is it an outer frame's return point?
+static void check_unwind(uint32_t pc, uint32_t sp) {
+    auto &fr = cur->frames;
+    for (size_t i = fr.size() - 1; i-- > 0;)
+        if (fr[i].stop == pc && fr[i].sp == sp) __builtin_longjmp(fr[i].jb, 1);
+}
+static bool run_interp_impl(uint32_t stop, uint32_t stop_sp, bool has_stop) {
     for (;;) {
         if (cpu->Halted) { handle_halt(); continue; }
         uint32_t pc = cur_pc();
         if (has_stop && pc == stop && cpu->R[13] == stop_sp) return false;
+        if (has_stop && cpu->R[13] > stop_sp && cur->frames.size() > 1 && thread_mode(cpu->CPSR)) check_unwind(pc, cpu->R[13]);
         if (pc == FREEBIOS_ARM9_RESET) { wait_for_arm7_reboot(); reset_world(); continue; }
         if (is_reset_target(pc)) { reset_world(); continue; }
         if (pc == ARM9_ENTRY) booted = true;
@@ -584,7 +613,7 @@ void recomp_stats(FILE *f) {
     fprintf(f, "native calls %llu, interpreted steps %llu, fallbacks %llu, diverts %llu, fibers %llu, thread switches %llu, parked %zu, resets %llu\n",
             (unsigned long long)stat_native_calls, (unsigned long long)stat_interp_steps, (unsigned long long)stat_fallbacks,
             (unsigned long long)stat_diverts, (unsigned long long)stat_fibers, (unsigned long long)stat_switches, waiting.size(), (unsigned long long)stat_resets);
-    fprintf(f, "host stack: deepest %zu KB on a game fiber since last report\n", stat_stack_max >> 10); stat_stack_max = 0;
+    fprintf(f, "host stack: deepest %zu KB on a game fiber since last report, guest unwinds %llu\n", stat_stack_max >> 10, (unsigned long long)stat_unwinds); stat_stack_max = 0;
     if (trace) {
         std::vector<std::pair<uint64_t, uint32_t>> v;
         for (auto &kv : fallback_hist) v.push_back({kv.second, kv.first});
