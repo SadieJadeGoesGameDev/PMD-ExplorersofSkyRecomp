@@ -389,7 +389,7 @@ int main(int argc, char **argv) {
     Platform::g_save_path = save_path;
     rec_start(dir, save);
     std::string save_name = save_path.substr(save_path.find_last_of("/\\") + 1);
-    std::string title = std::string("Explorers of Sky - Sky Recomp v0.7.1 - slot ") + std::to_string(S.save_slot) + " - " +
+    std::string title = std::string("Explorers of Sky - Sky Recomp v0.7.2 - slot ") + std::to_string(S.save_slot) + " - " +
                         (save.empty() ? "new save: " : "save loaded: ") + save_name;
 
     // ---- set up the DS
@@ -400,6 +400,7 @@ int main(int argc, char **argv) {
     auto srp = std::make_unique<SoftRenderer>(nds);
     SoftRenderer *sr = srp.get();
     nds.SetRenderer(std::move(srp));
+    { RendererSettings rs{}; rs.ScaleFactor = 1; rs.Threaded = !getenv("NOTHREAD3D"); sr->SetRenderSettings(rs); }   // 3D on its own thread
     const int WM = 43;                 // 256 + 2*43 = 342 wide = 16:9 at 192 high
     bool wide = S.widescreen != 0;
     sr->WideMargin = wide ? WM : 0;
@@ -703,6 +704,8 @@ int main(int argc, char **argv) {
             if (main_top && lit_frames >= 2) main_top = false;
         }
         bool show_top = force_screen == -1 ? main_top : force_screen == 0;
+        // only draw widescreen margins for screens that are on view (bit 0 top, bit 1 bottom)
+        sr->WideScreens = (layout != SINGLE || pip) ? 3 : (show_top ? 1 : 2);
         int vw = wide ? FW : 256, vx0 = wide ? 0 : WM;
         if (S.filter != FILTER_OFF) {
             // hand the visible picture to the filter thread; pick up its last result

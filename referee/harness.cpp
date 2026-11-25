@@ -164,6 +164,8 @@ int main(int argc, char** argv) {
     auto srp = std::make_unique<SoftRenderer>(nds);
     SoftRenderer* sr = srp.get();
     nds.SetRenderer(std::move(srp));
+    { RendererSettings rs{}; rs.ScaleFactor = 1; rs.Threaded = !getenv("NOTHREAD3D"); sr->SetRenderSettings(rs); }   // 3D on its own thread
+    if (getenv("WIDESCR")) sr->WideScreens = atoi(getenv("WIDESCR"));
     int W = getenv("WIDE") ? atoi(getenv("WIDE")) : 0;
     recomp_wide_margin = W;
     if (const char* sd = getenv("SADIE")) for (int g = 0; g < 6 && sd[g]; g++) recomp_settings.sadie[g] = sd[g] == '1';

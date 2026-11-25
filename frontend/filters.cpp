@@ -145,13 +145,13 @@ static void init_beam() {
 // horizontally expanded source (4x, sharpened ramp), computed once per frame
 static std::vector<uint32_t> g_hx;
 static inline int sharp_t(float pos, float scale, int *i0);
+static std::vector<int> g_exI, g_exT;
 static void crt_expand(const uint32_t *src, int w, int dw, int y0, int y1) {
-    const float scale = dw / (float)w;
     for (int y = y0; y < y1; y++) {
         const uint32_t *row = src + y * w;
         uint32_t *o = g_hx.data() + (size_t)y * dw;
         for (int sx = 0; sx < dw; sx++) {
-            int x0; int t = sharp_t((sx + 0.5f) * w / dw, scale, &x0);
+            int x0 = g_exI[sx], t = g_exT[sx];
             uint32_t a = row[x0 < 0 ? 0 : x0], b = row[x0 + 1 >= w ? w - 1 : x0 + 1];
             uint32_t r = (((a >> 16) & 0xFF) * (256 - t) + ((b >> 16) & 0xFF) * t) >> 8;
             uint32_t g = (((a >> 8) & 0xFF) * (256 - t) + ((b >> 8) & 0xFF) * t) >> 8;
@@ -184,6 +184,8 @@ static void crt_rows(int dw, int h, uint32_t *dst, int dh, int y0, int y1) {
 void crt(const uint32_t *src, int w, int h, uint32_t *dst, int dh, int dw) {
     if (!g_beam_ready) init_beam();
     g_hx.resize((size_t)dw * h);
+    g_exI.resize(dw); g_exT.resize(dw);
+    for (int x = 0; x < dw; x++) { int i; g_exT[x] = sharp_t((x + 0.5f) * w / dw, dw / (float)w, &i); g_exI[x] = i; }
     const int T = 4;
     std::thread th[T];
     for (int t = 0; t < T; t++) th[t] = std::thread(crt_expand, src, w, dw, h * t / T, h * (t + 1) / T);
@@ -209,8 +211,9 @@ static inline int sharp_t(float pos, float scale, int *i0) {          // pos in 
     f = (f - 0.5f) * scale + 0.5f; f = f < 0 ? 0 : f > 1 ? 1 : f;
     *i0 = i; return (int)(f * 256.0f + 0.5f);
 }
+static std::vector<int> g_colI, g_colT, g_colDark;   // per output column: source x, blend weight, grid darkening
 static void smooth_rows(const uint32_t *src, int w, int h, uint32_t *dst, int dh, int dw, int y0, int y1, int grid) {
-    const float sy_scale = dh / (float)h, sx_scale = dw / (float)w;
+    const float sy_scale = dh / (float)h;
     for (int y = y0; y < y1; y++) {
         int iy; float py = (y + 0.5f) * h / dh;
         int ty = sharp_t(py, sy_scale, &iy);
@@ -221,13 +224,11 @@ static void smooth_rows(const uint32_t *src, int w, int h, uint32_t *dst, int dh
         if (grid && sy_scale >= 3.0f) { float e = fy < 0.5f ? fy : 1 - fy; float edge = 0.5f / sy_scale; if (e < edge) rowdark = 30; }
         uint32_t *o = dst + (size_t)y * dw;
         for (int x = 0; x < dw; x++) {
-            int ix; float px = (x + 0.5f) * w / dw;
-            int tx = sharp_t(px, sx_scale, &ix);
+            int ix = g_colI[x], tx = g_colT[x];
             int ca = ix < 0 ? 0 : ix, cb = ix + 1 >= w ? w - 1 : ix + 1;
             uint32_t c = lerp4(A[ca], A[cb], B[ca], B[cb], tx, ty);
             if (grid) {
-                float fx = px - (int)px; int coldark = sx_scale >= 3.0f && (fx < 0.5f ? fx : 1 - fx) < 0.5f / sx_scale ? 22 : 0;
-                int k = 256 - rowdark - coldark;
+                int k = 256 - rowdark - g_colDark[x];
                 if (k < 256) {
                     uint32_t r = ((c >> 16) & 255) * k >> 8, g = ((c >> 8) & 255) * k >> 8, b = (c & 255) * k >> 8;
                     c = 0xFF000000u | r << 16 | g << 8 | b;
@@ -238,6 +239,14 @@ static void smooth_rows(const uint32_t *src, int w, int h, uint32_t *dst, int dh
     }
 }
 void smooth(const uint32_t *src, int w, int h, uint32_t *dst, int dh, int dw, int grid) {
+    const float sx_scale = dw / (float)w;
+    g_colI.resize(dw); g_colT.resize(dw); g_colDark.resize(dw);
+    for (int x = 0; x < dw; x++) {
+        int ix; float px = (x + 0.5f) * w / dw;
+        g_colT[x] = sharp_t(px, sx_scale, &ix); g_colI[x] = ix;
+        float fx = px - (int)px;
+        g_colDark[x] = sx_scale >= 3.0f && (fx < 0.5f ? fx : 1 - fx) < 0.5f / sx_scale ? 22 : 0;
+    }
     const int T = 4; std::thread th[T];
     for (int t = 0; t < T; t++) th[t] = std::thread(smooth_rows, src, w, h, dst, dh, dw, dh * t / T, dh * (t + 1) / T, grid);
     for (auto &t : th) t.join();

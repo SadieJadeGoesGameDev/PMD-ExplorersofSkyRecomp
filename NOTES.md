@@ -182,3 +182,13 @@
   On the destination rows it paints the capture left of the text box (dx = textbox_x - 6 - 2 - sw, clamped to -W-2),
   into the main line and the left margin after ExpandColor.
 - v0.7.1: the text box moves too. Portrait + 2 px gap + text box are centred as a group across the wide screen (two MoveRects, two mask ranges).
+
+## v0.7.2 — performance (Ally) + portrait halo
+- Profile (callgrind, dungeon): about 60% was 2D drawing. Margin passes drew full 256-px lines for 43 kept pixels.
+  SoftRenderer2D::DrawWidth (= W during margin passes) bounds the BG/compositing/sprite-interleave loops.
+- The wide-3D margin passes are clipped to the kept strip (SoftRenderer3D ClipX0/ClipX1 in the span loops).
+- The melonDS soft 3D render thread is on (RendererSettings.Threaded; NOTHREAD3D=1 turns it off).
+- Margins are skipped for screens not on view (SoftRenderer::WideScreens, set by the frontend from layout/pip/show_top).
+- Rig, 1200 dungeon frames on 2 cores: 11.1 s -> about 8.4 s, pixel-identical.
+- Filters: per-column sharp-bilinear tables (smooth, crt expand); output identical.
+- Portrait move: only pixels that change when the windows are masked are captured, so there is no scenery halo.
