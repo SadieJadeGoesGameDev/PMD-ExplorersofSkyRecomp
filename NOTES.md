@@ -166,3 +166,6 @@
   mode with SP above the innermost frame and lands on an outer frame's stop/sp, __builtin_longjmp unwinds the host
   there (stat_unwinds). Replay frames are pixel-identical; stack stays at about 3 KB.
 - F5/F6/F9 are dev-only (#ifdef SKYRECOMP_DEV, DEV=1 build_win.sh).
+
+## v0.6.5
+- The v0.6.4 unwind used __builtin_setjmp/__builtin_longjmp. On Windows it looped forever at one guest pc (hundreds of millions of unwinds, zero interpreter steps): Win64 callee-saved registers were not restored. Switched to standard setjmp/longjmp (SEH-aware on mingw). Added a guard: 64 repeats at the same pc/sp with no guest progress turns unwinding off for the session and logs it.

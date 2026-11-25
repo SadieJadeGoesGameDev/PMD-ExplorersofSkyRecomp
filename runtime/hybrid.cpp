@@ -1,3 +1,4 @@
+#include <csetjmp>
 // Hybrid runtime: recompiled (native) ARM9 code running inside melonDS's hardware.
 //
 // Each game thread runs on its own host fiber. When melonDS's scheduler asks the ARM9
@@ -72,7 +73,7 @@ struct Fiber {
     char *stack = nullptr;
 #endif
     std::vector<Key> keys;                          // resume points this thread is waiting on
-    struct IFrame { uint32_t stop, sp; void **jb; };
+    struct IFrame { uint32_t stop, sp; jmp_buf *jb; };
     std::vector<IFrame> frames;                     // nested interpreter runs on this fiber's host stack
 };
 static Fiber emu_f, *cur;
@@ -295,11 +296,11 @@ static bool run_interp_impl(uint32_t stop, uint32_t stop_sp, bool has_stop);
 // guest arrives at an outer frame's return point we unwind the host stack to that frame.
 static bool run_interp(uint32_t stop, uint32_t stop_sp, bool has_stop) {
     if (!has_stop) return run_interp_impl(stop, stop_sp, has_stop);
-    Fiber *me = cur;
-    size_t lvl = me->frames.size();
-    void *jb[5];
-    me->frames.push_back({stop, stop_sp, jb});
-    if (__builtin_setjmp(jb)) {         // the guest came back to our return point from a deeper level
+    Fiber *volatile me = cur;
+    volatile size_t lvl = me->frames.size();
+    jmp_buf jb;                         // standard setjmp: restores every callee-saved register (incl. Win64 xmm6-15)
+    me->frames.push_back({stop, stop_sp, &jb});
+    if (setjmp(jb)) {                   // the guest came back to our return point from a deeper level
         me->frames.resize(lvl);
         stat_unwinds++;
         return false;
@@ -309,10 +310,21 @@ static bool run_interp(uint32_t stop, uint32_t stop_sp, bool has_stop) {
     return r;
 }
 // The guest is at pc/sp in thread mode above the innermost frame's stack: is it an outer frame's return point?
+// Guard: if the same spot keeps unwinding without the guest running anything in between, stop unwinding (the
+// old behaviour, which only costs stack) rather than spin.
+static const bool no_unwind = getenv("NOUNWIND") != nullptr;
+static uint32_t uw_pc, uw_sp; static uint64_t uw_steps; static int uw_repeat; static bool uw_off;
 static void check_unwind(uint32_t pc, uint32_t sp) {
+    if (no_unwind || uw_off) return;
     auto &fr = cur->frames;
     for (size_t i = fr.size() - 1; i-- > 0;)
-        if (fr[i].stop == pc && fr[i].sp == sp) __builtin_longjmp(fr[i].jb, 1);
+        if (fr[i].stop == pc && fr[i].sp == sp) {
+            if (pc == uw_pc && sp == uw_sp && stat_interp_steps == uw_steps) {
+                if (++uw_repeat > 64) { uw_off = true; fprintf(stderr, "[recomp] unwind loop at %08X sp %08X: unwinding disabled\n", pc, sp); return; }
+            } else uw_repeat = 0;
+            uw_pc = pc; uw_sp = sp; uw_steps = stat_interp_steps;
+            longjmp(*fr[i].jb, 1);
+        }
 }
 static bool run_interp_impl(uint32_t stop, uint32_t stop_sp, bool has_stop) {
     for (;;) {
