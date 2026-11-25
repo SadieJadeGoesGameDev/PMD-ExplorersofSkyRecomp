@@ -169,3 +169,6 @@
 
 ## v0.6.5
 - The v0.6.4 unwind used __builtin_setjmp/__builtin_longjmp. On Windows it looped forever at one guest pc (hundreds of millions of unwinds, zero interpreter steps): Win64 callee-saved registers were not restored. Switched to standard setjmp/longjmp (SEH-aware on mingw). Added a guard: 64 repeats at the same pc/sp with no guest progress turns unwinding off for the session and logs it.
+
+## v0.6.6
+- Fades drawn as a solid (alpha 31) full-screen 3D quad exactly 4:3 wide were skipped by the uniform-3D fallback, which only took translucent lines. It now takes any uniform 3D line with alpha > 0, filling only where the wide render is empty. Intro black and white flashes are full width now.

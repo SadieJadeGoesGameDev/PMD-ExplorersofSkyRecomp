@@ -389,7 +389,7 @@ int main(int argc, char **argv) {
     Platform::g_save_path = save_path;
     rec_start(dir, save);
     std::string save_name = save_path.substr(save_path.find_last_of("/\\") + 1);
-    std::string title = std::string("Explorers of Sky - Sky Recomp v0.6.5 - slot ") + std::to_string(S.save_slot) + " - " +
+    std::string title = std::string("Explorers of Sky - Sky Recomp v0.6.6 - slot ") + std::to_string(S.save_slot) + " - " +
                         (save.empty() ? "new save: " : "save loaded: ") + save_name;
 
     // ---- set up the DS
