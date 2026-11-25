@@ -389,7 +389,7 @@ int main(int argc, char **argv) {
     Platform::g_save_path = save_path;
     rec_start(dir, save);
     std::string save_name = save_path.substr(save_path.find_last_of("/\\") + 1);
-    std::string title = std::string("Explorers of Sky - Sky Recomp v0.7.0 - slot ") + std::to_string(S.save_slot) + " - " +
+    std::string title = std::string("Explorers of Sky - Sky Recomp v0.7.1 - slot ") + std::to_string(S.save_slot) + " - " +
                         (save.empty() ? "new save: " : "save loaded: ") + save_name;
 
     // ---- set up the DS
@@ -637,10 +637,12 @@ int main(int argc, char **argv) {
         // dungeon darkness is translucent 3D that should carry into the margins; overworld 3D (cloud shadows) must not
         sr->WideExtend3D = recomp_cpu_ready() && recomp_overlay_loaded(29);
         {   // dialogue portraits sit left of the text box in widescreen
-            int pmv[8]; recomp_portrait_move(pmv);
-            sr->PortMove.on = pmv[0]; sr->PortMove.eng = pmv[1] ? 1 : 0;
-            sr->PortMove.sx = pmv[2]; sr->PortMove.sy = pmv[3]; sr->PortMove.sw = pmv[4]; sr->PortMove.sh = pmv[5];
-            sr->PortMove.dx = pmv[6]; sr->PortMove.dy = pmv[7];
+            int pmv[14] = {0}; recomp_portrait_move(pmv);
+            sr->PortMove.n = pmv[0]; sr->PortMove.eng = pmv[1] ? 1 : 0;
+            for (int k = 0; k < 2; k++) {
+                auto& r = sr->PortMove.r[k]; const int* v = pmv + 2 + k * 6;
+                r.sx = v[0]; r.sy = v[1]; r.sw = v[2]; r.sh = v[3]; r.dx = v[4]; r.dy = v[5];
+            }
         }
         if (S.request_exit) running = false;
         if (S.request_slot) {

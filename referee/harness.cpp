@@ -266,10 +266,12 @@ int main(int argc, char** argv) {
         if (getenv("STATS") && getenv("RECOMP") && i % 1800 == 0) { fprintf(stderr, "[frame %d] ", i); recomp_stats(stderr); }
         if (getenv("RECOMP")) { sadie_sync(); sr->WideExtend3D = recomp_cpu_ready() && recomp_overlay_loaded(29); }
         {   // dialogue portraits sit left of the text box in widescreen
-            int pmv[8]; recomp_portrait_move(pmv);
-            sr->PortMove.on = pmv[0]; sr->PortMove.eng = pmv[1] ? 1 : 0;
-            sr->PortMove.sx = pmv[2]; sr->PortMove.sy = pmv[3]; sr->PortMove.sw = pmv[4]; sr->PortMove.sh = pmv[5];
-            sr->PortMove.dx = pmv[6]; sr->PortMove.dy = pmv[7];
+            int pmv[14] = {0}; recomp_portrait_move(pmv);
+            sr->PortMove.n = pmv[0]; sr->PortMove.eng = pmv[1] ? 1 : 0;
+            for (int k = 0; k < 2; k++) {
+                auto& r = sr->PortMove.r[k]; const int* v = pmv + 2 + k * 6;
+                r.sx = v[0]; r.sy = v[1]; r.sw = v[2]; r.sh = v[3]; r.dx = v[4]; r.dy = v[5];
+            }
         }
         if (getenv("RESETAT") && i == atoi(getenv("RESETAT"))) recomp_inject_reset = 1;
         if (getenv("RESETAT") && i > atoi(getenv("RESETAT")) && (i - atoi(getenv("RESETAT"))) % 30 == 1 && i < atoi(getenv("RESETAT")) + 400) { fprintf(stderr, "frame %d: ", i); recomp_arm7_state(stderr); }

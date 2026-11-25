@@ -181,3 +181,4 @@
   with the window layers masked (BG0 3D frame/backdrop plus 256-wide text BGs) via SoftRenderer2D MaskX0/X1/MaskBits.
   On the destination rows it paints the capture left of the text box (dx = textbox_x - 6 - 2 - sw, clamped to -W-2),
   into the main line and the left margin after ExpandColor.
+- v0.7.1: the text box moves too. Portrait + 2 px gap + text box are centred as a group across the wide screen (two MoveRects, two mask ranges).

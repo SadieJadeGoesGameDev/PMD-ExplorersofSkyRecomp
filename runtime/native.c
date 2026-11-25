@@ -493,8 +493,8 @@ void recomp_menu_reset(void) { rm_state = RM_IDLE; rm_win = -2; }
 
 /* ---------------------------------------------------------------- portraits beside the text box (widescreen)
    Reads the game's window list. When a portrait box and a dialogue box are both showing on the same screen,
-   returns where the portrait is drawn and where it should go instead: left of the text box, at the same height,
-   reaching into the left margin. out: {on, screen, sx, sy, sw, sh, dx, dy} in pixels. */
+   returns where both are drawn and where they should go: portrait beside the text box at the same height, the pair
+   centred across the wide screen. out: {n, screen, then per window sx, sy, sw, sh, dx, dy} in pixels. */
 #define WINDOW_LIST 0x022A88DCu
 #define UPD_PORTRAIT 0x0202F70Cu
 #define UPD_DIALOGUE 0x0202F488u
@@ -514,11 +514,13 @@ void recomp_portrait_move(int *out) {
     uint32_t p = WINDOW_LIST + pw * 224, d = WINDOW_LIST + dw * 224;
     int scr = rd8(p + 8);
     if (scr != rd8(d + 8)) return;
-    const int P = 6;                                   /* the frame sits ~5 px outside the window */
-    int sx = rd8(p + 4) * 8 - P, sy = rd8(p + 5) * 8 - P, sw = rd8(p + 6) * 8 + 2 * P, sh = rd8(p + 7) * 8 + 2 * P;
-    int tx = rd8(d + 4) * 8 - P, ty = rd8(d + 5) * 8 - P;
-    int dx = tx - 2 - sw, dy = ty;
-    if (dx < -recomp_wide_margin - 2) dx = -recomp_wide_margin - 2;
-    if (sx == dx && sy == dy) return;
-    out[0] = 1; out[1] = scr; out[2] = sx; out[3] = sy; out[4] = sw; out[5] = sh; out[6] = dx; out[7] = dy;
+    const int P = 6, GAP = 2;                          /* the frame sits ~5 px outside the window */
+    int psx = rd8(p + 4) * 8 - P, psy = rd8(p + 5) * 8 - P, psw = rd8(p + 6) * 8 + 2 * P, psh = rd8(p + 7) * 8 + 2 * P;
+    int tsx = rd8(d + 4) * 8 - P, tsy = rd8(d + 5) * 8 - P, tsw = rd8(d + 6) * 8 + 2 * P, tsh = rd8(d + 7) * 8 + 2 * P;
+    /* centre portrait + gap + text box as one group across the wide screen */
+    int left = (256 - (psw + GAP + tsw)) / 2;
+    if (left < -recomp_wide_margin) left = -recomp_wide_margin;
+    out[0] = 2; out[1] = scr;
+    out[2] = psx; out[3] = psy; out[4] = psw; out[5] = psh; out[6] = left; out[7] = tsy;
+    out[8] = tsx; out[9] = tsy; out[10] = tsw; out[11] = tsh; out[12] = left + psw + GAP; out[13] = tsy;
 }
